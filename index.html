@@ -465,15 +465,15 @@ table.data tr.tot td{font-weight:700;border-top:2px solid var(--ink);border-bott
    1) FIREBASE — hier eintragen (siehe EINRICHTUNG.md)
    ══════════════════════════════════════════════════════ */
 const FIREBASE = {
-  apiKey:            "",
-  authDomain:        "",
-  projectId:         "",
-  storageBucket:     "",
-  messagingSenderId: "",
-  appId:             ""
+  apiKey:            "AIzaSyARdbGg5dHaXKZJP-GMjRbkSSBbR-hWd_Q",
+  authDomain:        "salha-rechnungen.firebaseapp.com",
+  projectId:         "salha-rechnungen",
+  storageBucket:     "salha-rechnungen.firebasestorage.app",
+  messagingSenderId: "1065696827012",
+  appId:             "1:1065696827012:web:343655bfcab1ce7abed4d1"
 };
-// Deine eigene Benutzer-ID. Nach der ersten Anmeldung zeigt die App sie an.
-const OWNER_UID = "";
+// Inhaber = nizar_salha@live.de
+const OWNER_UID = "qeV1IsGxAxRfj71rMbAlPQBbD9o1";
 /* ══════════════════════════════════════════════════════ */
 
 const SDK="https://www.gstatic.com/firebasejs/10.12.5/";
@@ -1264,8 +1264,16 @@ async function starten(){
     $("#gPass").addEventListener("keydown",e=>{if(e.key==="Enter")$("#gGo").click();});
     $("#logout").onclick=()=>auth.signOut(FB.auth).then(()=>location.reload());
   }catch(e){
-    Store=Local; $("#dot").className="dot local"; $("#modeTxt").textContent="Lokal (Fehler)";
-    toast("Firebase nicht erreichbar — lokaler Modus");
+    // Firebase ist konfiguriert, aber nicht erreichbar — das darf nicht unbemerkt bleiben,
+    // sonst landen echte Rechnungen versehentlich nur im Browser.
+    Store=Local; $("#dot").className="dot local"; $("#modeTxt").textContent="OFFLINE";
+    document.querySelector("main").insertAdjacentHTML("afterbegin",
+      `<div class="note" style="border-color:var(--rot);background:#FDF2F2;font-size:14px">
+        <b>Keine Verbindung zu Firebase.</b> Die App läuft nur lokal in diesem Browser —
+        Rechnungen werden <b>nicht</b> online gespeichert und die Steuerberatung sieht sie nicht.
+        Bitte Internetverbindung prüfen und die Seite neu laden.
+        <span class="ar">لا يوجد اتصال بـ Firebase. لا تصدر فواتير حقيقية الآن — تحقق من الإنترنت وأعد تحميل الصفحة.</span>
+      </div>`);
     await starten();
   }
 })();
