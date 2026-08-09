@@ -227,6 +227,13 @@ table.data tr.tot td{font-weight:700;border-top:2px solid var(--ink);border-bott
     <div class="pay" id="payPick"></div>
   </div>
 
+  <div class="card"><h3>Garantie</h3>
+    <div class="pay" id="garPick">
+      <label><input type="radio" name="garantie" value="6" checked><span>6 Monate</span></label>
+      <label><input type="radio" name="garantie" value="12"><span>12 Monate</span></label>
+    </div>
+  </div>
+
   <div class="card"><h3>Käufer</h3>
     <label style="margin-bottom:16px"><span>Adresse einfügen</span>
       <textarea id="n_paste" rows="4" placeholder="Adresse aus eBay hier einfügen (Strg + V) — Name, Straße, PLZ, Ort, Land und Telefon werden automatisch verteilt."></textarea>
@@ -301,7 +308,7 @@ table.data tr.tot td{font-weight:700;border-top:2px solid var(--ink);border-bott
       <th style="width:32px"></th><th style="width:74px">Nr.</th><th style="width:86px">Datum</th>
       <th>Käufer</th><th style="width:104px">Zahlung</th><th style="width:118px">Steuer</th>
       <th class="r" style="width:96px">Netto</th><th class="r" style="width:96px">Brutto</th>
-      <th style="width:150px"></th></tr></thead><tbody></tbody></table>
+      <th style="width:200px"></th></tr></thead><tbody></tbody></table>
   </div>
 </section>
 
@@ -382,8 +389,9 @@ table.data tr.tot td{font-weight:700;border-top:2px solid var(--ink);border-bott
   <div class="card"><h3>Fußzeile</h3>
     <div class="grid g2">
       <label><span>Zeile 1</span><input id="f1"></label>
-      <label><span>Zeile 2 (grün)</span><input id="f2"></label>
     </div>
+    <p class="hint">Die Garantiezeile (6 oder 12 Monate) wird jetzt bei jeder Rechnung einzeln gewählt.
+      <span class="ar">سطر الضمان صار يُختار لكل فاتورة على حدة من صفحة Neue Rechnung.</span></p>
     <label style="margin-top:14px"><span>Zeile 3 (rot)</span><input id="f3"></label>
     <label style="margin-top:14px"><span>Kleingedrucktes (je Zeile eine)</span><textarea id="f4" rows="3"></textarea></label>
     <label style="margin-top:14px"><span>Schlusszeile</span><input id="f5"></label>
@@ -530,7 +538,6 @@ const STD={set:{next:9959,prefix:"",satz:19,oss:1,klein:0,
   tel:"",fax:"",mob:"",mail:"",
   ustid:"",stnr:"",logo:"",
   f1:"Diese Rechnung wurde maschinell erstellt und ist daher nicht unterschrieben !",
-  f2:"Garantie 12 Monate",
   f3:"! WIR HAFTEN NICHT FÜR BESCHÄDIGUNGEN AN DER WARE DURCH UNSACHGEMÄßEN EINBAU !",
   f4:"",
   f5:"VIELEN DANK FÜR IHREN AUFTRAG"},
@@ -762,6 +769,7 @@ $("#nSave").onclick=async()=>{
     const nr=await Store.nextNr();
     const rec={nr,prefix:DB.set.prefix||"",datum,monat:datum.slice(0,7),
       zahlung:$$('input[name=zahl]').find(r=>r.checked).value,
+      garantie:$$('input[name=garantie]').find(r=>r.checked).value,
       name,ref:$("#n_ref").value.trim(),str:$("#n_str").value.trim(),plz:$("#n_plz").value.trim(),
       ort:$("#n_ort").value.trim(),land:$("#n_land").value,tel:$("#n_tel").value.trim(),ustid,
       pos,versand,satz:st.satz,art:st.art,kurz:st.kurz,hinweis:st.hinweis,
@@ -770,6 +778,7 @@ $("#nSave").onclick=async()=>{
     ["n_name","n_ref","n_str","n_plz","n_ort","n_tel","n_ustid","n_paste"].forEach(i=>$("#"+i).value="");
     $("#n_versand").value="0,00"; $("#nPos tbody").innerHTML=""; posRow();
     $$('input[name=tax]').forEach(r=>r.checked=(r.value==="auto"));
+    $$('input[name=garantie]').forEach(r=>r.checked=(r.value==="6"));
     $("#n_hinweis").value=""; taxUI();
     updateNext(); renderListe();
     druck([rec.nr]);
@@ -807,9 +816,11 @@ function renderListe(){
     <td style="color:var(--steel)">${esc(r.kurz)}</td>
     <td class="r m">${eur(r.netto)}</td><td class="r m">${eur(r.brutto)}</td>
     <td class="r"><button class="btn quiet" data-p="${r.nr}" style="padding:4px 10px;font-size:13px">Drucken</button>
+      <button class="btn quiet" data-o="${r.nr}" style="padding:4px 10px;font-size:13px">ODS</button>
       <button class="icon" data-d="${r.nr}" title="Stornieren">✕</button></td></tr>`).join("")
     : `<tr><td colspan="9" class="empty">Keine Rechnungen</td></tr>`;
   $$("#tab button[data-p]").forEach(b=>b.onclick=()=>druck([+b.dataset.p]));
+  $$("#tab button[data-o]").forEach(b=>b.onclick=()=>odsDownload(+b.dataset.o));
   $$("#tab button[data-d]").forEach(b=>b.onclick=()=>storno(+b.dataset.d));
 }
 ["#q","#fMonat","#fZahl"].forEach(s=>$(s).oninput=renderListe);
@@ -914,7 +925,7 @@ $("#k_add").onclick=async()=>{
 /* ---------- Einstellungen ---------- */
 const SID={next:"s_next",prefix:"s_prefix",satz:"s_satz",firma:"s_firma",zusatz:"s_zusatz",str:"s_str",
   ort:"s_ort",tel:"s_tel",fax:"s_fax",mob:"s_mob",mail:"s_mail",ustid:"s_ustid",stnr:"s_stnr",
-  oss:"s_oss",klein:"s_klein",f1:"f1",f2:"f2",f3:"f3",f4:"f4",f5:"f5"};
+  oss:"s_oss",klein:"s_klein",f1:"f1",f3:"f3",f4:"f4",f5:"f5"};
 function fillSet(){ Object.entries(SID).forEach(([k,id])=>{const el=$("#"+id);if(el)el.value=DB.set[k];});
   updateNext(); }
 $("#saveSet").onclick=async()=>{
@@ -986,7 +997,9 @@ function bogen(r){
       <tr><td class="l">UMSATZSTEUER</td><td class="v">${eur(r.ust)}</td></tr>
       <tr class="end"><td class="l">END BETRAG</td><td class="v">${eur(r.brutto)}</td></tr></table>
     <div class="foot">
-      <div class="l1">${esc(S.f1)}</div><div class="l2">${esc(S.f2)}</div><div class="l3">${esc(S.f3)}</div>
+      <div class="l1">${esc(S.f1)}</div>
+      ${r.garantie?`<div class="l2">Garantie ${esc(r.garantie)} Monate</div>`:""}
+      <div class="l3">${esc(S.f3)}</div>
       ${String(S.f4||"").split("\n").map(l=>`<div class="l4">${esc(l)}</div>`).join("")}
       <div class="l5">ZAHLUNG&nbsp; ${esc(r.zahlung)}<br>${esc(S.f5)}</div></div></div>`;
 }
@@ -1025,6 +1038,179 @@ function journal(monat){
       ${S.stnr?" · Steuernummer "+esc(S.stnr):""}<br>
       Erstellt am ${dDE(heute())}. Beträge in EUR.</p></div>`;
   setTimeout(()=>window.print(),150);
+}
+
+/* ==================== ODS-Export (echte .ods-Datei, ohne externe Bibliothek) ==================== */
+function crc32(bytes){
+  if(!crc32.table){
+    const t=[];
+    for(let n=0;n<256;n++){ let c=n; for(let k=0;k<8;k++) c=(c&1)?(0xEDB88320^(c>>>1)):(c>>>1); t[n]=c>>>0; }
+    crc32.table=t;
+  }
+  let crc=0xFFFFFFFF;
+  for(let i=0;i<bytes.length;i++) crc=(crc>>>8)^crc32.table[(crc^bytes[i])&0xFF];
+  return (crc^0xFFFFFFFF)>>>0;
+}
+function dosDateTime(d){
+  const time=((d.getHours()&0x1F)<<11)|((d.getMinutes()&0x3F)<<5)|((d.getSeconds()>>1)&0x1F);
+  const date=(((Math.max(0,d.getFullYear()-1980))&0x7F)<<9)|(((d.getMonth()+1)&0xF)<<5)|(d.getDate()&0x1F);
+  return {time,date};
+}
+function buildZipStore(files){
+  const enc=s=>new TextEncoder().encode(s);
+  const {time,date}=dosDateTime(new Date());
+  const chunks=[]; const centrals=[]; let offset=0;
+  files.forEach(f=>{
+    const nameBytes=enc(f.name), data=f.data, crc=crc32(data), size=data.length;
+    const local=new Uint8Array(30+nameBytes.length), lv=new DataView(local.buffer);
+    lv.setUint32(0,0x04034b50,true); lv.setUint16(4,20,true); lv.setUint16(6,0,true);
+    lv.setUint16(8,0,true); lv.setUint16(10,time,true); lv.setUint16(12,date,true);
+    lv.setUint32(14,crc,true); lv.setUint32(18,size,true); lv.setUint32(22,size,true);
+    lv.setUint16(26,nameBytes.length,true); lv.setUint16(28,0,true);
+    local.set(nameBytes,30);
+    const localOffset=offset;
+    chunks.push(local); chunks.push(data); offset+=local.length+data.length;
+
+    const central=new Uint8Array(46+nameBytes.length), cv=new DataView(central.buffer);
+    cv.setUint32(0,0x02014b50,true); cv.setUint16(4,20,true); cv.setUint16(6,20,true);
+    cv.setUint16(8,0,true); cv.setUint16(10,0,true); cv.setUint16(12,time,true); cv.setUint16(14,date,true);
+    cv.setUint32(16,crc,true); cv.setUint32(20,size,true); cv.setUint32(24,size,true);
+    cv.setUint16(28,nameBytes.length,true); cv.setUint16(30,0,true); cv.setUint16(32,0,true);
+    cv.setUint16(34,0,true); cv.setUint16(36,0,true); cv.setUint32(38,0,true); cv.setUint32(42,localOffset,true);
+    central.set(nameBytes,46);
+    centrals.push(central);
+  });
+  const centralStart=offset;
+  centrals.forEach(c=>{ chunks.push(c); offset+=c.length; });
+  const centralSize=offset-centralStart;
+  const eocd=new Uint8Array(22), ev=new DataView(eocd.buffer);
+  ev.setUint32(0,0x06054b50,true); ev.setUint16(4,0,true); ev.setUint16(6,0,true);
+  ev.setUint16(8,files.length,true); ev.setUint16(10,files.length,true);
+  ev.setUint32(12,centralSize,true); ev.setUint32(16,centralStart,true); ev.setUint16(20,0,true);
+  chunks.push(eocd);
+  let total=0; chunks.forEach(c=>total+=c.length);
+  const out=new Uint8Array(total); let p=0; chunks.forEach(c=>{ out.set(c,p); p+=c.length; });
+  return out;
+}
+function odsCell(spec){
+  if(!spec) return "<table:table-cell/>";
+  const st=spec.style?` table:style-name="${spec.style}"`:"";
+  if(spec.f!=null) return `<table:table-cell${st} table:formula="=${spec.f}" office:value-type="float" office:value="${spec.v}"><text:p>${esc(nf.format(spec.v))}</text:p></table:table-cell>`;
+  if(typeof spec.n==="number") return `<table:table-cell${st} office:value-type="float" office:value="${spec.n}"><text:p>${esc(nf.format(spec.n))}</text:p></table:table-cell>`;
+  return `<table:table-cell${st} office:value-type="string"><text:p>${esc(spec.s||"")}</text:p></table:table-cell>`;
+}
+function odsRow(cells){ cells=cells.slice(0,5); while(cells.length<5) cells.push(null);
+  return "<table:table-row>"+cells.map(odsCell).join("")+"</table:table-row>"; }
+
+function odsContentXml(r){
+  const S=DB.set; const rows=[]; let n=0;
+  const push=c=>{ rows.push(odsRow(c)); n++; };
+
+  push([{s:S.firma,style:"ce_title"}]);
+  if(S.zusatz) push([{s:S.zusatz}]);
+  if(S.str) push([{s:S.str}]);
+  if(S.ort) push([{s:S.ort}]);
+  push([]);
+  push([{s:"Rechnungsnummer",style:"ce_bold"},{s:(r.prefix||"")+r.nr}]);
+  push([{s:"Datum",style:"ce_bold"},{s:dDE(r.datum)}]);
+  push([{s:"Zahlungsart",style:"ce_bold"},{s:r.zahlung||""}]);
+  push([{s:"Garantie",style:"ce_bold"},{s:r.garantie?(r.garantie+" Monate"):"—"}]);
+  push([{s:"Steuerfall",style:"ce_bold"},{s:r.kurz||""}]);
+  push([]);
+  push([{s:"Kunde",style:"ce_bold"}]);
+  push([{s:r.name||""}]);
+  if(r.str) push([{s:r.str}]);
+  const ortLine=[r.plz,r.ort].filter(Boolean).join(" ");
+  if(ortLine) push([{s:ortLine}]);
+  push([{s:landName(r.land)}]);
+  if(r.ustid) push([{s:"USt-IdNr.",style:"ce_bold"},{s:r.ustid}]);
+  push([]);
+
+  push([{s:"Menge",style:"ce_bold"},{s:"Beschreibung",style:"ce_bold"},{s:"Artikel-Nr.",style:"ce_bold"},
+        {s:"Preis netto",style:"ce_bold"},{s:"Betrag netto",style:"ce_bold"}]);
+  const posStart=n+1;
+  r.pos.forEach(p=>{
+    const netStk=netto(p.brutto,r.satz)/Math.max(1,p.qty); // unrounded — verhindert Rundungsabweichung in der Summenformel
+    const row=n+1;
+    rows.push(odsRow([{n:p.qty},{s:p.title},{s:p.sku||""},{n:netStk,style:"ce_num"},
+      {f:`[.A${row}]*[.D${row}]`,v:r2(netStk*p.qty),style:"ce_num"}]));
+    n++;
+  });
+  if(r.versand>0){
+    const shipNet=netto(r.versand,r.satz), row=n+1;
+    rows.push(odsRow([{n:1},{s:"Versandkosten"},{s:""},{n:shipNet,style:"ce_num"},
+      {f:`[.A${row}]*[.D${row}]`,v:shipNet,style:"ce_num"}]));
+    n++;
+  }
+  const posEnd=n;
+  push([]);
+
+  const nettoRow=n+1;
+  rows.push(odsRow([null,null,null,{s:"NETTO",style:"ce_bold"},
+    {f:`SUM([.E${posStart}:.E${posEnd}])`,v:r.netto,style:"ce_num"}])); n++;
+  push([null,null,null,{s:"STEUERSATZ",style:"ce_bold"},{s:nf.format(r.satz)+" %"}]);
+  const ustRow=n+1;
+  rows.push(odsRow([null,null,null,{s:"UMSATZSTEUER",style:"ce_bold"},
+    {f:`[.E${nettoRow}]*${r.satz}/100`,v:r.ust,style:"ce_num"}])); n++;
+  rows.push(odsRow([null,null,null,{s:"END BETRAG",style:"ce_title"},
+    {f:`[.E${nettoRow}]+[.E${ustRow}]`,v:r.brutto,style:"ce_num"}])); n++;
+
+  push([]);
+  if(r.hinweis) push([{s:r.hinweis}]);
+  push([{s:S.f1}]);
+  if(r.garantie) push([{s:"Garantie "+r.garantie+" Monate"}]);
+  push([{s:S.f3}]);
+  String(S.f4||"").split("\n").forEach(l=>{ if(l.trim()) push([{s:l}]); });
+  push([{s:S.f5}]);
+
+  const styles=`
+   <style:style style:name="ce_bold" style:family="table-cell"><style:text-properties fo:font-weight="bold"/></style:style>
+   <style:style style:name="ce_title" style:family="table-cell"><style:text-properties fo:font-weight="bold" fo:font-size="14pt" fo:color="#12266B"/></style:style>
+   <number:currency-style style:name="N-EUR" number:language="de" number:country="DE">
+     <number:number number:decimal-places="2" number:min-integer-digits="1" number:grouping="true"/>
+     <number:text> </number:text>
+     <number:currency-symbol number:language="de" number:country="DE">EUR</number:currency-symbol>
+   </number:currency-style>
+   <style:style style:name="ce_num" style:family="table-cell" style:data-style-name="N-EUR"/>`;
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+ xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0"
+ xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"
+ xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0"
+ xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0"
+ xmlns:number="urn:oasis:names:tc:opendocument:xmlns:datastyle:1.0"
+ office:version="1.2">
+ <office:automatic-styles>${styles}</office:automatic-styles>
+ <office:body><office:spreadsheet>
+   <table:table table:name="Rechnung">${rows.join("")}</table:table>
+ </office:spreadsheet></office:body>
+</office:document-content>`;
+}
+function odsManifestXml(){
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0" manifest:version="1.2">
+ <manifest:file-entry manifest:full-path="/" manifest:version="1.2" manifest:media-type="application/vnd.oasis.opendocument.spreadsheet"/>
+ <manifest:file-entry manifest:full-path="content.xml" manifest:media-type="text/xml"/>
+</manifest:manifest>`;
+}
+function buildInvoiceOds(r){
+  const enc=s=>new TextEncoder().encode(s);
+  const files=[
+    {name:"mimetype",data:enc("application/vnd.oasis.opendocument.spreadsheet")},
+    {name:"META-INF/manifest.xml",data:enc(odsManifestXml())},
+    {name:"content.xml",data:enc(odsContentXml(r))}
+  ];
+  return buildZipStore(files);
+}
+function odsDownload(nr){
+  const r=DB.rechnungen.find(x=>x.nr===nr);
+  if(!r) return toast("Rechnung nicht gefunden");
+  try{
+    const bytes=buildInvoiceOds(r);
+    dl(new Blob([bytes],{type:"application/vnd.oasis.opendocument.spreadsheet"}),
+       "Rechnung-"+(r.prefix||"")+r.nr+".ods");
+  }catch(e){ toast("Fehler beim Erstellen: "+(e.message||e)); }
 }
 
 /* ---------- Start ---------- */
