@@ -1003,11 +1003,29 @@ function bogen(r){
       ${String(S.f4||"").split("\n").map(l=>`<div class="l4">${esc(l)}</div>`).join("")}
       <div class="l5">ZAHLUNG&nbsp; ${esc(r.zahlung)}<br>${esc(S.f5)}</div></div></div>`;
 }
+// Der Browser benutzt document.title als Dateinamen beim "Als PDF speichern".
+function mitDruckTitel(titel,fn){
+  const alt=document.title;
+  document.title=String(titel).replace(/[\\/:*?"<>|]/g,"-").trim();
+  // afterprint feuert nicht auf allen Geräten (z. B. iOS) — daher mehrere Auslöser
+  const zurueck=()=>{
+    document.title=alt;
+    window.removeEventListener("afterprint",zurueck);
+    window.removeEventListener("focus",zurueck);
+  };
+  window.addEventListener("afterprint",zurueck);
+  window.addEventListener("focus",zurueck);
+  setTimeout(zurueck,20000);
+  fn();
+}
 function druck(nrs){
   const rs=DB.rechnungen.filter(r=>nrs.includes(r.nr)).sort((a,b)=>a.nr-b.nr);
   if(!rs.length) return;
   $("#out").innerHTML=rs.map(bogen).join("");
-  setTimeout(()=>window.print(),150);
+  const titel = rs.length===1
+    ? "Rechnung "+(rs[0].prefix||"")+rs[0].nr+" "+(rs[0].name||"")
+    : "Rechnungen "+(rs[0].prefix||"")+rs[0].nr+"-"+(rs[rs.length-1].prefix||"")+rs[rs.length-1].nr;
+  mitDruckTitel(titel, ()=>setTimeout(()=>window.print(),150));
 }
 function journal(monat){
   const a=auswertung(monat), S=DB.set;
@@ -1037,7 +1055,8 @@ function journal(monat){
       ${esc(S.firma)} · ${esc(S.str)} · ${esc(S.ort)} · USt-IdNr. ${esc(S.ustid)}
       ${S.stnr?" · Steuernummer "+esc(S.stnr):""}<br>
       Erstellt am ${dDE(heute())}. Beträge in EUR.</p></div>`;
-  setTimeout(()=>window.print(),150);
+  mitDruckTitel("Rechnungsausgangsbuch "+monLabel(monat),
+                ()=>setTimeout(()=>window.print(),150));
 }
 
 /* ==================== ODS-Export (echte .ods-Datei, ohne externe Bibliothek) ==================== */
