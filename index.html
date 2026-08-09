@@ -935,11 +935,44 @@ $("#saveSet").onclick=async()=>{
   try{ await Store.saveSet(); toast("Gespeichert"); }catch(e){ toast("Fehler: "+e.message); }
   fillSet(); refreshNeu();
 };
-$("#s_logo").onchange=e=>{const f=e.target.files[0];if(!f)return;const rd=new FileReader();
-  rd.onload=async()=>{DB.set.logo=String(rd.result);LOGO=DB.set.logo;
-    $("#brandLogo").src=LOGO;$("#gateLogo").src=LOGO;
-    try{await Store.saveSet();toast("Logo ersetzt");}catch(x){toast("Fehler: "+x.message);}};
-  rd.readAsDataURL(f);};
+// Logo wird vor dem Speichern verkleinert — Firestore erlaubt max. 1 MB pro Dokument.
+function logoVerkleinern(datei){
+  return new Promise((ok,fehler)=>{
+    const rd=new FileReader();
+    rd.onerror=()=>fehler(new Error("Datei nicht lesbar"));
+    rd.onload=()=>{
+      const img=new Image();
+      img.onerror=()=>fehler(new Error("Kein gültiges Bild"));
+      img.onload=()=>{
+        const max=520;
+        let w=img.naturalWidth, h=img.naturalHeight;
+        if(!w||!h) return fehler(new Error("Bild ohne Größe"));
+        if(w>max||h>max){ const f=Math.min(max/w,max/h); w=Math.round(w*f); h=Math.round(h*f); }
+        const c=document.createElement("canvas"); c.width=w; c.height=h;
+        const ctx=c.getContext("2d");
+        ctx.fillStyle="#fff"; ctx.fillRect(0,0,w,h);   // weißer Grund statt schwarz bei PNG
+        ctx.drawImage(img,0,0,w,h);
+        let q=0.86, out=c.toDataURL("image/jpeg",q);
+        while(out.length>700000 && q>0.4){ q-=0.12; out=c.toDataURL("image/jpeg",q); }
+        ok(out);
+      };
+      img.src=String(rd.result);
+    };
+    rd.readAsDataURL(datei);
+  });
+}
+$("#s_logo").onchange=async e=>{
+  const f=e.target.files[0]; if(!f) return;
+  if(!/^image\//.test(f.type)) return toast("Bitte eine Bilddatei wählen");
+  try{
+    const klein=await logoVerkleinern(f);
+    DB.set.logo=klein; LOGO=klein;
+    $("#brandLogo").src=LOGO; $("#gateLogo").src=LOGO;
+    await Store.saveSet();
+    toast("Logo ersetzt ("+Math.round(klein.length/1024)+" KB)");
+  }catch(x){ toast("Fehler: "+(x.message||x)); }
+  e.target.value="";
+};
 $("#expJson").onclick=()=>dl(new Blob([JSON.stringify(DB,null,2)],{type:"application/json"}),
   "salha-sicherung-"+heute()+".json");
 $("#impBtn").onclick=()=>$("#impJson").click();
