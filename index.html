@@ -300,9 +300,50 @@ table.data tr.tot td{font-weight:700;border-top:2px solid var(--ink);border-bott
     <span class="ar">إشعار دائن للزبون عند إرجاع قطعة واسترداد المبلغ.</span></p>
 
   <div class="card"><h3>Ursprungsrechnung</h3>
-    <div class="row">
-      <select id="g_rech" style="flex:1;min-width:280px"></select>
-      <button class="btn quiet" id="g_laden">Positionen übernehmen</button>
+    <div class="pay" id="g_modus" style="margin-bottom:16px">
+      <label><input type="radio" name="gmodus" value="auto" checked><span>Aus dem System</span></label>
+      <label><input type="radio" name="gmodus" value="manuell"><span>Ältere Rechnung — manuell</span></label>
+    </div>
+
+    <div id="g_autoBox">
+      <div class="row">
+        <select id="g_rech" style="flex:1;min-width:280px"></select>
+        <button class="btn quiet" id="g_laden">Positionen übernehmen</button>
+      </div>
+    </div>
+
+    <div id="g_manuellBox" style="display:none">
+      <p class="hint" style="margin:0 0 14px">Für Rechnungen, die vor diesem System ausgestellt wurden —
+        z. B. wenn ein Kunde ein Teil nach Monaten zurückgibt.
+        <span class="ar">للفواتير القديمة اللي صدرت قبل النظام، مثلًا زبون رجّع قطعة بعد شهرين.</span></p>
+      <div class="grid g3">
+        <label><span>Rechnungsnummer</span><input id="gm_nr" class="num" placeholder="9958"></label>
+        <label><span>Rechnungsdatum</span><input id="gm_datum" type="date"></label>
+        <label><span>Steuerfall</span><select id="gm_fall">
+          <option value="inland">Inland — mit MwSt.</option>
+          <option value="frei">Ohne MwSt. / § 25a</option>
+          <option value="rc">Reverse Charge (EU-Firma)</option>
+          <option value="export">Ausfuhr (Drittland)</option>
+          <option value="oss">OSS — EU-Verbraucher</option>
+        </select></label>
+      </div>
+      <div class="row" style="margin-top:14px">
+        <label style="max-width:150px" id="gm_satzWrap"><span>Satz %</span>
+          <input id="gm_satz" class="num" value="19"></label>
+        <label style="flex:1;min-width:240px"><span>Hinweis auf der Gutschrift</span>
+          <input id="gm_hinweis" list="hinweise" placeholder="optional"></label>
+      </div>
+      <div class="grid g2" style="margin-top:16px">
+        <label><span>Name</span><input id="gm_name" placeholder="Thomas Söllner"></label>
+        <label><span>Telefon</span><input id="gm_tel"></label>
+        <label><span>Straße</span><input id="gm_str"></label>
+        <label><span>USt-IdNr. (falls Firma)</span><input id="gm_ustid" class="num"></label>
+        <label><span>PLZ</span><input id="gm_plz" class="num"></label>
+        <label><span>Ort</span><input id="gm_ort"></label>
+        <label><span>Land</span><select id="gm_land"></select></label>
+      </div>
+      <label style="margin-top:14px"><span>Adresse einfügen</span>
+        <textarea id="gm_paste" rows="3" placeholder="Adresse hier einfügen — wird automatisch verteilt."></textarea></label>
     </div>
     <div class="note blue" style="margin-bottom:0">Der Bezug zur Rechnung ist Pflicht (§ 14 UStG) und wird
       auf der Gutschrift gedruckt. Steuersatz und Steuerfall werden aus der Rechnung übernommen.
@@ -972,6 +1013,11 @@ $("#nSave").onclick=async()=>{
 let G_QUELLE=null;   // die gewählte Ursprungsrechnung
 function nurRechnungen(){ return DB.rechnungen.filter(r=>!istGut(r)); }
 function gutInit(){
+  if($("#g_zahl") && !$("#g_zahl").options.length)
+    $("#g_zahl").innerHTML=ZAHLUNG.map(z=>`<option>${z}</option>`).join("");
+  if(!$("#g_datum").value) $("#g_datum").value=heute();
+  if(!$("#g_rueck").value) $("#g_rueck").value=heute();
+  if(gModus()==="manuell") return;
   $("#g_zahl").innerHTML=ZAHLUNG.map(z=>`<option>${z}</option>`).join("");
   if(!$("#g_datum").value) $("#g_datum").value=heute();
   if(!$("#g_rueck").value) $("#g_rueck").value=heute();
@@ -1021,12 +1067,13 @@ function gutLesen(){
   }).filter(x=>x.qty>0 && x.brutto>0 && x.title);
 }
 function gutSumme(){
-  const satz=G_QUELLE?G_QUELLE.satz:0;
+  const basis=gutBasis();
+  const satz=basis?basis.satz:0;
   const pos=gutLesen();
   let n=0; pos.forEach(x=>n+=netto(x.brutto,satz));
   n=r2(n); const mw=r2(n*satz/100);
   const brutto=r2(n+mw);
-  const zuviel = G_QUELLE && brutto>Math.abs(G_QUELLE.brutto)+0.009;
+  const zuviel = basis && isFinite(basis.brutto) && brutto>Math.abs(basis.brutto)+0.009;
   $("#gSum").innerHTML = pos.length
     ? `Netto <b style="font-family:var(--mono)">${eur(n)}</b> · USt. <b style="font-family:var(--mono)">${eur(mw)}</b>
        · Erstattung <b style="font-family:var(--mono);font-size:16px">${eur(brutto)}</b>
@@ -1039,10 +1086,16 @@ $("#g_laden").onclick=gutLaden;
 $("#gAdd").onclick=()=>{gutRow(1,"",0);gutSumme();};
 
 $("#gSave").onclick=async()=>{
-  if(!G_QUELLE) return toast("Bitte zuerst eine Rechnung wählen");
+  const manuell = gModus()==="manuell";
+  const basis = gutBasis();
+  if(!manuell && !G_QUELLE) return toast("Bitte zuerst eine Rechnung wählen");
+  if(manuell){
+    if(!$("#gm_nr").value.trim()) return toast("Rechnungsnummer der Ursprungsrechnung fehlt");
+    if(!$("#gm_name").value.trim()) return toast("Name des Kunden fehlt");
+  }
   const {pos,netto:n,ust,brutto,satz}=gutSumme();
   if(!pos.length) return toast("Keine Position mit Menge und Betrag");
-  if(brutto>Math.abs(G_QUELLE.brutto)+0.009 &&
+  if(!manuell && brutto>Math.abs(G_QUELLE.brutto)+0.009 &&
      !confirm("Die Gutschrift ist höher als der Rechnungsbetrag ("+eur(G_QUELLE.brutto)+").\n\nTrotzdem erstellen?"))
     return;
   const datum=$("#g_datum").value||heute();
@@ -1052,17 +1105,29 @@ $("#gSave").onclick=async()=>{
     const rec={typ:"gutschrift", nr, prefix:"", datum, monat:datum.slice(0,7),
       rueck:$("#g_rueck").value||datum,
       zahlung:$("#g_zahl").value, grund:$("#g_grund").value.trim(),
-      bezugNr:G_QUELLE.nr, bezugPrefix:G_QUELLE.prefix||"", bezugDatum:G_QUELLE.datum,
-      name:G_QUELLE.name, ref:G_QUELLE.ref, str:G_QUELLE.str, plz:G_QUELLE.plz,
-      ort:G_QUELLE.ort, land:G_QUELLE.land, tel:G_QUELLE.tel, ustid:G_QUELLE.ustid,
+      bezugNr: manuell ? $("#gm_nr").value.trim() : G_QUELLE.nr,
+      bezugPrefix: manuell ? "" : (G_QUELLE.prefix||""),
+      bezugDatum: manuell ? ($("#gm_datum").value||"") : G_QUELLE.datum,
+      extern: manuell,
+      name: manuell ? $("#gm_name").value.trim() : G_QUELLE.name,
+      ref:  manuell ? "" : G_QUELLE.ref,
+      str:  manuell ? $("#gm_str").value.trim() : G_QUELLE.str,
+      plz:  manuell ? $("#gm_plz").value.trim() : G_QUELLE.plz,
+      ort:  manuell ? $("#gm_ort").value.trim() : G_QUELLE.ort,
+      land: manuell ? $("#gm_land").value : G_QUELLE.land,
+      tel:  manuell ? $("#gm_tel").value.trim() : G_QUELLE.tel,
+      ustid:manuell ? $("#gm_ustid").value.trim() : G_QUELLE.ustid,
       pos:pos.map(x=>({qty:x.qty,title:x.title,sku:"",brutto:x.brutto})), versand:0,
-      satz, art:G_QUELLE.art, kurz:G_QUELLE.kurz, hinweis:G_QUELLE.hinweis,
+      satz, art:basis.art, kurz:basis.kurz, hinweis:basis.hinweis,
       // negativ gespeichert, damit Monatssummen korrekt gemindert werden
       netto:-n, ust:-ust, brutto:-brutto,
       erstellt:new Date().toISOString()};
     await Store.addRechnung(rec);
     $("#g_grund").value=""; G_QUELLE=null;
-    gutInit(); renderListe(); updateNextGut();
+    if(manuell){ ["gm_nr","gm_name","gm_str","gm_plz","gm_ort","gm_tel","gm_ustid","gm_hinweis"]
+      .forEach(i=>$("#"+i).value=""); $("#gPos tbody").innerHTML=""; gutRow(1,"",0); }
+    else gutInit();
+    gutSumme(); renderListe(); updateNextGut();
     druck([{nr:rec.nr,typ:"gutschrift"}]);
     toast("Gutschrift "+nr+" erstellt");
   }catch(e){ toast("Fehler: "+(e.message||e)); }
@@ -1273,6 +1338,67 @@ function druckEinkauf(nr){
   mitDruckTitel("Einkaufsbeleg "+e.nr+" "+(e.name||""), ()=>setTimeout(()=>window.print(),150));
 }
 
+
+/* ---- Gutschrift: manueller Modus für ältere Rechnungen ---- */
+function gModus(){ const r=$$('input[name=gmodus]').find(x=>x.checked); return r?r.value:"auto"; }
+function gModusUI(){
+  const m=gModus()==="manuell";
+  $("#g_autoBox").style.display = m?"none":"";
+  $("#g_manuellBox").style.display = m?"":"none";
+  if(m){
+    if(!$("#gm_land").options.length)
+      $("#gm_land").innerHTML=Object.keys(LAND).sort((a,b)=>LAND[a].localeCompare(LAND[b],"de"))
+        .map(c=>`<option value="${c}"${c==="DE"?" selected":""}>${LAND[c]} (${c})</option>`).join("");
+    if(!$("#gm_datum").value) $("#gm_datum").value=heute();
+    G_QUELLE=null;
+    $("#g_info").innerHTML="";
+    if(!$$("#gPos tbody tr").length) gutRow(1,"",0);
+  }else{ gutInit(); }
+  gmSatzUI(); gutSumme();
+}
+function gmSatzUI(){
+  const f=$("#gm_fall").value;
+  const mitSatz = (f==="inland"||f==="oss");
+  $("#gm_satzWrap").style.display = mitSatz?"":"none";
+  if(!mitSatz) $("#gm_satz").value="0";
+  else if(parseNum($("#gm_satz").value)===0) $("#gm_satz").value=String(DB.set.satz||19);
+  gutSumme();
+}
+$("#g_modus").addEventListener("change",gModusUI);
+$("#gm_fall").addEventListener("change",gmSatzUI);
+["gm_satz","gm_nr"].forEach(id=>{const el=$("#"+id); if(el) el.oninput=gutSumme;});
+$("#gm_paste").addEventListener("paste",e=>{
+  const t=(e.clipboardData||window.clipboardData).getData("text"); if(!t) return;
+  e.preventDefault(); if(gmAdresse(t)) $("#gm_paste").value="";
+});
+$("#gm_paste").addEventListener("input",e=>{
+  const t=e.target.value;
+  if(t.split(/\n/).filter(x=>x.trim()).length>=2){ if(gmAdresse(t)) e.target.value=""; }
+});
+function gmAdresse(t){
+  const a=parseAdresse(t);
+  if(!a.name&&!a.str&&!a.plz){ toast("Adresse nicht erkannt"); return false; }
+  if(a.name)$("#gm_name").value=a.name; if(a.str)$("#gm_str").value=a.str;
+  if(a.plz)$("#gm_plz").value=a.plz;   if(a.ort)$("#gm_ort").value=a.ort;
+  if(a.tel)$("#gm_tel").value=a.tel;   if(a.land)$("#gm_land").value=a.land;
+  toast("Adresse übernommen"); return true;
+}
+const GM_TEXTE={
+  inland:"", frei:"", 
+  rc:"Steuerfreie innergemeinschaftliche Lieferung (§ 4 Nr. 1b i.V.m. § 6a UStG). Steuerschuldnerschaft des Leistungsempfängers – Reverse Charge (Art. 196 MwStSystRL).",
+  export:"Steuerfreie Ausfuhrlieferung (§ 4 Nr. 1a i.V.m. § 6 UStG). Tax-free export delivery.",
+  oss:"Besteuerung im Bestimmungsland gemäß One-Stop-Shop-Verfahren (§ 3c UStG)."};
+const GM_KURZ={inland:"Inland",frei:"Ohne MwSt.",rc:"Reverse",export:"Ausfuhr",oss:"OSS"};
+// Quelle der Steuerdaten: entweder die gewählte Rechnung oder die manuellen Felder
+function gutBasis(){
+  if(gModus()==="manuell"){
+    const f=$("#gm_fall").value;
+    return {satz:Math.max(0,parseNum($("#gm_satz").value)), art:f, kurz:GM_KURZ[f]||"—",
+            hinweis:($("#gm_hinweis").value.trim()||GM_TEXTE[f]||""),
+            brutto:Infinity};
+  }
+  return G_QUELLE;
+}
 /* ---------- Liste ---------- */
 function monate(){ return [...new Set(DB.rechnungen.map(r=>r.monat))].sort().reverse(); }
 function fillMonatSelects(){
@@ -1299,7 +1425,7 @@ function renderListe(){
       ${esc((r.prefix||"")+r.nr)}${istGut(r)?'<br><span class="tag" style="background:#F3EDF9;color:var(--lila)">Gutschrift</span>':""}</td>
     <td class="m">${dDE(r.datum)}</td>
     <td>${esc(r.name)} <span class="tag">${esc(r.land)}</span>
-      ${istGut(r)?`<div class="hint">zu Rechnung ${esc((r.bezugPrefix||"")+r.bezugNr)}</div>`:""}</td>
+      ${istGut(r)?`<div class="hint">zu Rechnung ${esc((r.bezugPrefix||"")+r.bezugNr)}${r.extern?" (extern)":""}</div>`:""}</td>
     <td><span class="tag">${esc(r.zahlung)}</span></td>
     <td style="color:var(--steel)">${esc(r.kurz)}</td>
     <td class="r m">${eur(r.netto)}</td><td class="r m">${eur(r.brutto)}</td>
@@ -1619,7 +1745,7 @@ function gutschriftBogen(r){
       <dt>GUTSCHRIFTSNR</dt><dd>${esc(r.nr)}</dd>
       <dt>GUTSCHRIFTSDATUM</dt><dd>${dDE(r.datum)}</dd>
       <dt>RÜCKZAHLDATUM</dt><dd>${dDE(r.rueck||r.datum)}</dd>
-      <dt>BEZUG</dt><dd style="font-size:10pt">Rechnung Nr. ${esc((r.bezugPrefix||"")+r.bezugNr)} vom ${dDE(r.bezugDatum)}</dd>
+      <dt>BEZUG</dt><dd style="font-size:10pt">Rechnung Nr. ${esc((r.bezugPrefix||"")+r.bezugNr)}${r.bezugDatum?" vom "+dDE(r.bezugDatum):""}</dd>
     </dl>
     ${r.grund?`<div style="margin-top:6mm;font-size:9.5pt">
        <b>Anmerkungen oder besondere Anweisungen:</b><br>${esc(r.grund)}</div>`:""}
