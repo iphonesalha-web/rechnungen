@@ -227,6 +227,11 @@ table.data tr.tot td{font-weight:700;border-top:2px solid var(--ink);border-bott
     <div class="pay" id="payPick"></div>
   </div>
 
+  <div class="note" id="editBanner" style="display:none;border-color:var(--blau);background:#F2F5FD">
+    <b id="editText"></b>
+    <button class="btn quiet" id="editAbbruch" style="margin-left:14px;padding:4px 12px;font-size:13px">Abbrechen</button>
+  </div>
+
   <div class="card"><h3>Währung</h3>
     <div class="grid g3">
       <label><span>Rechnungswährung</span><select id="n_waehrung"></select></label>
@@ -313,6 +318,15 @@ table.data tr.tot td{font-weight:700;border-top:2px solid var(--ink);border-bott
       <button class="btn quiet" id="nAdd">+ Position</button>
       <label style="margin-left:auto;width:190px"><span>Versand brutto</span><input id="n_versand" class="num" value="0,00"></label>
     </div>
+    <label id="splitWrap" style="display:none;margin-top:14px;padding:12px 14px;border:1px solid var(--line);
+           border-radius:2px;background:#FCFDFE">
+      <span style="display:flex;align-items:center;gap:10px;text-transform:none;font-family:var(--body);
+             font-size:14px;font-weight:500;letter-spacing:0;color:var(--ink);margin:0">
+        <input type="checkbox" id="n_split" style="width:17px;height:17px;accent-color:var(--blau);flex:none">
+        Für jede Position eine eigene Rechnung erstellen
+      </span>
+      <span class="hint" id="splitInfo"></span>
+    </label>
     <div class="row spread" style="margin-top:16px;border-top:1px solid var(--line);padding-top:14px">
       <span class="hint" id="nSum">—</span>
       <button class="btn" id="nSave">Rechnung erstellen</button>
@@ -1092,10 +1106,13 @@ function aktFall(){
   return {st:steuerFall($("#n_land").value,ust,$$('input[name=zahl]').find(r=>r.checked).value),ustid:ust};
 }
 function refreshNeu(){
+  if(typeof splitUI==="function") splitUI();
   const {st}=aktFall(), pos=lesePos();
   let n=0; pos.forEach(p=>n+=netto(p.brutto,st.satz));
+  const bruttoRoh=r2(pos.reduce((a,x)=>a+x.brutto,0)+parseNum($("#n_versand").value));
   n=r2(n+netto(parseNum($("#n_versand").value),st.satz));
-  const mw=r2(n*st.satz/100);
+  // Steuer aus der Differenz — so bleibt der eingegebene Bruttobetrag exakt erhalten
+  const mw=r2(bruttoRoh-n);
   $("#fallBox").innerHTML=`<span class="stamp ${st.art}"><b>${esc(st.kurz)}</b><span>${esc(st.lang)}</span></span>`;
   const w=aktWaehrung(), k=aktKurs(), ges=r2(n+mw);
   const eurAnz=$("#n_eurAnzeige");
@@ -1182,39 +1199,171 @@ $("#n_waehrung").innerHTML=WAEHRUNGEN.map(([c,n])=>
 $("#n_waehrung").addEventListener("change",waehrungUI);
 $("#n_kurs").addEventListener("input",()=>{refreshNeu();uiSpeichern();});
 
+
+/* ---- Aufteilen: pro Position eine eigene Rechnung ---- */
+function splitUI(){
+  const pos=lesePos(), w=$("#splitWrap");
+  if(!w) return;
+  w.style.display = pos.length>1 ? "" : "none";
+  if(pos.length<2){ $("#n_split").checked=false; }
+  const info=$("#splitInfo");
+  if(info) info.textContent = $("#n_split").checked
+    ? `Es entstehen ${pos.length} Rechnungen mit den Nummern `
+      + Array.from({length:pos.length},(_,k)=>(DB.set.prefix||"")+(DB.set.next+k)).join(", ")
+      + (r2(parseNum($("#n_versand").value))>0 ? " · Versand kommt auf die erste Rechnung." : "")
+    : "Jede Position bekommt eine eigene Rechnungsnummer.";
+}
+$("#n_split").addEventListener("change",splitUI);
+
+
+/* ---- Rechnung bearbeiten — nur am Tag der Ausstellung ---- */
+let EDIT_NR=null;
+function tagVon(iso){ return String(iso||"").slice(0,10); }
+function darfBearbeiten(r){
+  if(istGut(r)) return false;
+  return tagVon(r.erstellt)===heute();
+}
+function editUI(){
+  const an=EDIT_NR!==null;
+  $("#editBanner").style.display = an?"":"none";
+  $("#nSave").textContent = an ? "Änderung speichern" : "Rechnung erstellen";
+  if(an) $("#editText").textContent="Rechnung "+(DB.set.prefix||"")+EDIT_NR+" wird bearbeitet — die Nummer bleibt gleich.";
+  if($("#splitWrap")) $("#splitWrap").style.display = an ? "none" : $("#splitWrap").style.display;
+}
+$("#editAbbruch").onclick=()=>{ EDIT_NR=null; formLeeren(); editUI(); toast("Bearbeitung abgebrochen"); };
+
+function formLeeren(){
+  ["n_name","n_ref","n_str","n_plz","n_ort","n_tel","n_ustid","n_paste","n_hinweis"]
+    .forEach(i=>{ if($("#"+i)) $("#"+i).value=""; });
+  $("#n_versand").value="0,00"; $("#nPos tbody").innerHTML=""; posRow();
+  $$('input[name=tax]').forEach(r=>r.checked=(r.value==="auto"));
+  if($("#n_split")) $("#n_split").checked=false;
+  taxUI(); refreshNeu();
+}
+
+function bearbeiten(nr){
+  const r=DB.rechnungen.find(x=>x.nr===nr&&!istGut(x));
+  if(!r) return;
+  if(!darfBearbeiten(r)) return toast("Nur am Ausstellungstag änderbar — bitte stornieren und neu ausstellen");
+  EDIT_NR=nr;
+  $("#n_name").value=r.name||""; $("#n_ref").value=r.ref||"";
+  $("#n_str").value=r.str||"";   $("#n_plz").value=r.plz||"";
+  $("#n_ort").value=r.ort||"";   $("#n_tel").value=r.tel||"";
+  $("#n_ustid").value=r.ustid||""; $("#n_land").value=r.land||"DE";
+  $("#n_datum").value=r.datum||heute();
+  $("#n_versand").value=nf.format(r.versand||0);
+  $("#n_waehrung").value=r.waehrung||"EUR";
+  $("#n_kurs").value=nf.format(r.kurs||1);
+  $$('input[name=zahl]').forEach(x=>x.checked=(x.value===r.zahlung));
+  $$('input[name=garantie]').forEach(x=>x.checked=(x.value===String(r.garantie||"6")));
+  $$('input[name=bezahlt]').forEach(x=>x.checked=(x.value===(r.bezahlt===false?"nein":"ja")));
+  if(r.bezahlt===false && r.faellig) $("#n_faellig").value=r.faellig;
+
+  // Steuer: automatisch, wenn das Ergebnis identisch wäre — sonst manuell
+  const auto=steuerFall(r.land, r.ustid, r.zahlung);
+  const gleich = auto.satz===r.satz && auto.kurz===r.kurz;
+  $$('input[name=tax]').forEach(x=>x.checked=(x.value===(gleich?"auto":(r.satz>0?"mit":"ohne"))));
+  if(!gleich){ $("#n_satz").value=nf.format(r.satz); $("#n_hinweis").value=r.hinweis||""; }
+
+  $("#nPos tbody").innerHTML="";
+  (r.pos||[]).forEach(pz=>{
+    posRow();
+    const tr=$("#nPos tbody").lastElementChild, c=tr.querySelectorAll("input");
+    c[0].value=pz.qty; c[1].value=pz.title; c[2].value=pz.sku||""; c[3].value=nf.format(pz.brutto);
+  });
+  if(!$$("#nPos tbody tr").length) posRow();
+
+  taxUI(); statusUI(); waehrungUI(); refreshNeu(); editUI();
+  $$("#nav button")[0].click();
+  window.scrollTo(0,0);
+  toast("Rechnung "+(r.prefix||"")+nr+" geladen");
+}
+
 $("#nSave").onclick=async()=>{
   const name=$("#n_name").value.trim(); if(!name) return toast("Name fehlt");
   const pos=lesePos(); if(!pos.length) return toast("Mindestens eine Position mit Preis");
   const {st,ustid}=aktFall();
   let n=0; pos.forEach(p=>n+=netto(p.brutto,st.satz));
   const versand=r2(parseNum($("#n_versand").value));
-  const nett=r2(n+netto(versand,st.satz)), mw=r2(nett*st.satz/100);
+  const bruttoRoh=r2(pos.reduce((a,x)=>a+x.brutto,0)+versand);
+  const nett=r2(n+netto(versand,st.satz)), mw=r2(bruttoRoh-nett);
   const datum=$("#n_datum").value||heute();
   $("#nSave").disabled=true;
+  const teilen = EDIT_NR===null && $("#n_split") && $("#n_split").checked && pos.length>1;
   try{
     const w=aktWaehrung(), kurs=aktKurs();
-    const nr=await Store.nextNr();
-    const rec={nr,prefix:DB.set.prefix||"",datum,monat:datum.slice(0,7),
-      waehrung:w, kurs,
-      nettoW:nett, ustW:mw, bruttoW:r2(nett+mw),
-      zahlung:$$('input[name=zahl]').find(r=>r.checked).value,
-      garantie:$$('input[name=garantie]').find(r=>r.checked).value,
-      bezahlt: istBezahltUI(),
-      faellig: istBezahltUI() ? "" : ($("#n_faellig").value||datum),
-      bezahltAm: istBezahltUI() ? datum : "",
-      name,ref:$("#n_ref").value.trim(),str:$("#n_str").value.trim(),plz:$("#n_plz").value.trim(),
-      ort:$("#n_ort").value.trim(),land:$("#n_land").value,tel:$("#n_tel").value.trim(),ustid,
-      pos,versand,satz:st.satz,art:st.art,kurz:st.kurz,hinweis:st.hinweis,
-      netto:r2(nett*kurs), ust:r2(mw*kurs), brutto:r2(r2(nett+mw)*kurs),
-      erstellt:new Date().toISOString()};
-    await Store.addRechnung(rec);
+
+    // ---- Änderung einer bestehenden Rechnung (nur am Ausstellungstag) ----
+    if(EDIT_NR!==null){
+      const alt=DB.rechnungen.find(x=>x.nr===EDIT_NR&&!istGut(x));
+      if(!alt) { EDIT_NR=null; editUI(); throw new Error("Rechnung nicht mehr vorhanden"); }
+      if(!darfBearbeiten(alt)) { EDIT_NR=null; editUI(); throw new Error("Änderung nicht mehr erlaubt"); }
+      const verlauf=(alt.verlauf||[]).concat([{
+        zeit:new Date().toISOString(),
+        vorher:{name:alt.name, brutto:alt.brutto, bruttoW:alt.bruttoW,
+                waehrung:alt.waehrung, satz:alt.satz, datum:alt.datum,
+                pos:(alt.pos||[]).map(x=>({q:x.qty,t:x.title,b:x.brutto}))}
+      }]);
+      const neu=Object.assign({},alt,{
+        datum, monat:datum.slice(0,7), waehrung:w, kurs,
+        nettoW:nett, ustW:mw, bruttoW:r2(nett+mw),
+        zahlung:$$('input[name=zahl]').find(r=>r.checked).value,
+        garantie:$$('input[name=garantie]').find(r=>r.checked).value,
+        bezahlt: istBezahltUI(),
+        faellig: istBezahltUI() ? "" : ($("#n_faellig").value||datum),
+        name, ref:$("#n_ref").value.trim(), str:$("#n_str").value.trim(),
+        plz:$("#n_plz").value.trim(), ort:$("#n_ort").value.trim(),
+        land:$("#n_land").value, tel:$("#n_tel").value.trim(), ustid,
+        pos, versand, satz:st.satz, art:st.art, kurz:st.kurz, hinweis:st.hinweis,
+        netto:r2(nett*kurs), ust:r2(mw*kurs), brutto:r2(r2(nett+mw)*kurs),
+        geaendert:new Date().toISOString(), verlauf});
+      await Store.updRechnung(neu);
+      const nrAlt=EDIT_NR; EDIT_NR=null;
+      formLeeren(); editUI(); uiSpeichern(); datumPruefen();
+      updateNext(); renderListe();
+      druck([nrAlt]);
+      toast("Rechnung "+(neu.prefix||"")+nrAlt+" geändert");
+      $("#nSave").disabled=false;
+      return;
+    }
+
+    // Eine Gruppe = eine spätere Rechnung. Versand geht auf die erste.
+    const gruppen = teilen
+      ? pos.map((pz,idx)=>({pos:[pz], versand: idx===0 ? versand : 0}))
+      : [{pos, versand}];
+    const erstellt=[];
+    for(const g of gruppen){
+      let gn=0; g.pos.forEach(pz=>gn+=netto(pz.brutto,st.satz));
+      const gBrutto=r2(g.pos.reduce((a,x)=>a+x.brutto,0)+g.versand);
+      const gNett=r2(gn+netto(g.versand,st.satz)), gMw=r2(gBrutto-gNett);
+      const nr=await Store.nextNr();
+      const rec={nr,prefix:DB.set.prefix||"",datum,monat:datum.slice(0,7),
+        waehrung:w, kurs,
+        nettoW:gNett, ustW:gMw, bruttoW:r2(gNett+gMw),
+        zahlung:$$('input[name=zahl]').find(r=>r.checked).value,
+        garantie:$$('input[name=garantie]').find(r=>r.checked).value,
+        bezahlt: istBezahltUI(),
+        faellig: istBezahltUI() ? "" : ($("#n_faellig").value||datum),
+        bezahltAm: istBezahltUI() ? datum : "",
+        name,ref:$("#n_ref").value.trim(),str:$("#n_str").value.trim(),plz:$("#n_plz").value.trim(),
+        ort:$("#n_ort").value.trim(),land:$("#n_land").value,tel:$("#n_tel").value.trim(),ustid,
+        pos:g.pos, versand:g.versand, satz:st.satz, art:st.art, kurz:st.kurz, hinweis:st.hinweis,
+        netto:r2(gNett*kurs), ust:r2(gMw*kurs), brutto:r2(r2(gNett+gMw)*kurs),
+        erstellt:new Date().toISOString()};
+      await Store.addRechnung(rec);
+      erstellt.push(rec);
+    }
+    const rec=erstellt[erstellt.length-1];
     ["n_name","n_ref","n_str","n_plz","n_ort","n_tel","n_ustid","n_paste"].forEach(i=>$("#"+i).value="");
     $("#n_versand").value="0,00"; $("#nPos tbody").innerHTML=""; posRow();
     $$('input[name=tax]').forEach(r=>r.checked=(r.value==="auto"));
     $("#n_hinweis").value=""; taxUI(); uiSpeichern(); datumPruefen();
-    updateNext(); renderListe();
-    druck([rec.nr]);
-    toast("Rechnung "+(DB.set.prefix||"")+nr+" erstellt");
+    if($("#n_split")) $("#n_split").checked=false;
+    splitUI(); updateNext(); renderListe();
+    druck(erstellt.map(x=>x.nr));
+    toast(erstellt.length>1
+      ? erstellt.length+" Rechnungen erstellt: "+erstellt.map(x=>(x.prefix||"")+x.nr).join(", ")
+      : "Rechnung "+(rec.prefix||"")+rec.nr+" erstellt");
   }catch(e){ toast("Fehler: "+(e.message||e)); }
   $("#nSave").disabled=false;
 };
@@ -1282,7 +1431,9 @@ function gutSumme(){
   const satz=basis?basis.satz:0;
   const pos=gutLesen();
   let n=0; pos.forEach(x=>n+=netto(x.brutto,satz));
-  n=r2(n); const mw=r2(n*satz/100);
+  n=r2(n);
+  const bruttoRoh=r2(pos.reduce((a,x)=>a+x.brutto,0));
+  const mw=r2(bruttoRoh-n);
   const brutto=r2(n+mw);
   const zuviel = basis && isFinite(basis.brutto) && brutto>Math.abs(basis.brutto)+0.009;
   const gw=(basis&&basis.waehrung)||"EUR", gk=(basis&&basis.kurs)||1;
@@ -1653,7 +1804,7 @@ function renderListe(){
     <td><input type="checkbox" data-nr="${r.nr}" data-typ="${istGut(r)?"gutschrift":"rechnung"}"></td>
     <td class="m" style="color:${istGut(r)?"var(--lila)":"var(--gruen)"};font-weight:600">
       ${esc((r.prefix||"")+r.nr)}${istGut(r)?'<br><span class="tag" style="background:#F3EDF9;color:var(--lila)">Gutschrift</span>':""}</td>
-    <td class="m">${dDE(r.datum)}</td>
+    <td class="m">${dDE(r.datum)}${r.geaendert?`<div class="hint" title="${esc(r.geaendert)}">geändert</div>`:""}</td>
     <td>${esc(r.name)} <span class="tag">${esc(r.land)}</span>
       ${istGut(r)?`<div class="hint">zu Rechnung ${esc((r.bezugPrefix||"")+r.bezugNr)}${r.extern?" (extern)":""}</div>`:""}</td>
     <td>${r.bezahlt===false
@@ -1667,12 +1818,14 @@ function renderListe(){
     <td class="r"><button class="btn quiet" data-p="${r.nr}" data-t="${istGut(r)?"g":"r"}" style="padding:4px 10px;font-size:13px">Drucken</button>
       ${istGut(r)?"":`<button class="btn quiet" data-o="${r.nr}" style="padding:4px 10px;font-size:13px">ODS</button>`}
       ${(!istGut(r)&&r.bezahlt===false)?`<button class="btn quiet" data-b="${r.nr}" style="padding:4px 10px;font-size:13px;border-color:var(--gruen);color:var(--gruen)">Bezahlt</button>`:""}
+      ${darfBearbeiten(r)?`<button class="btn quiet" data-e="${r.nr}" style="padding:4px 10px;font-size:13px;border-color:var(--blau);color:var(--blau)">Ändern</button>`:""}
       <button class="icon" data-d="${r.nr}" data-t="${istGut(r)?"g":"r"}" title="Löschen">✕</button></td></tr>`).join("")
     : `<tr><td colspan="9" class="empty">Keine Rechnungen</td></tr>`;
   $$("#tab button[data-p]").forEach(b=>b.onclick=()=>
     druck([{nr:+b.dataset.p, typ:b.dataset.t==="g"?"gutschrift":"rechnung"}]));
   $$("#tab button[data-o]").forEach(b=>b.onclick=()=>odsDownload(+b.dataset.o));
   $$("#tab button[data-b]").forEach(b=>b.onclick=()=>alsBezahlt(+b.dataset.b));
+  $$("#tab button[data-e]").forEach(b=>b.onclick=()=>bearbeiten(+b.dataset.e));
   $$("#tab button[data-d]").forEach(b=>b.onclick=()=>
     storno(+b.dataset.d, b.dataset.t==="g"?"gutschrift":"rechnung"));
 }
