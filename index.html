@@ -227,6 +227,19 @@ table.data tr.tot td{font-weight:700;border-top:2px solid var(--ink);border-bott
     <div class="pay" id="payPick"></div>
   </div>
 
+  <div class="card"><h3>Zahlungsstatus</h3>
+    <div class="pay" id="statusPick">
+      <label><input type="radio" name="bezahlt" value="ja" checked><span>Bezahlt</span></label>
+      <label><input type="radio" name="bezahlt" value="nein"><span>Noch nicht bezahlt</span></label>
+    </div>
+    <div class="row" id="zielWrap" style="display:none;margin-top:14px">
+      <label style="max-width:180px"><span>Zahlungsziel (Tage)</span><input id="n_zieltage" class="num" value="14"></label>
+      <label style="max-width:220px"><span>Fällig am</span><input id="n_faellig" type="date"></label>
+      <span class="hint" style="align-self:flex-end;padding-bottom:10px">Die Rechnung wird mit Zahlungsaufforderung
+        und Bankverbindung gedruckt.</span>
+    </div>
+  </div>
+
   <div class="card"><h3>Garantie</h3>
     <div class="pay" id="garPick">
       <label><input type="radio" name="garantie" value="6" checked><span>6 Monate</span></label>
@@ -250,7 +263,8 @@ table.data tr.tot td{font-weight:700;border-top:2px solid var(--ink);border-bott
       <label><span>USt-IdNr. (Firmenkunde EU)</span><input id="n_ustid" class="num" placeholder="FR12345678901"></label>
     </div>
     <div class="row" style="margin-top:14px">
-      <label style="max-width:220px"><span>Rechnungsdatum</span><input id="n_datum" type="date"></label>
+      <label style="max-width:260px"><span>Rechnungsdatum</span><input id="n_datum" type="date">
+        <span class="hint" id="datumWarn" style="display:none;color:var(--orange);font-weight:600"></span></label>
       <div style="margin-left:auto;align-self:flex-end"><span id="fallBox"></span></div>
     </div>
   </div>
@@ -489,6 +503,12 @@ table.data tr.tot td{font-weight:700;border-top:2px solid var(--ink);border-bott
   <div class="card"><h3>Nach Zahlungsart</h3>
     <table class="data" id="mZahl"><thead><tr><th>Zahlungsart</th><th class="r">Anzahl</th>
       <th class="r">Brutto</th></tr></thead><tbody></tbody></table></div>
+  <div class="card"><h3>Offene Rechnungen</h3>
+    <p class="hint" style="margin-top:-8px">Alle noch nicht bezahlten Rechnungen — unabhängig vom Monat.
+      <span class="ar">كل الفواتير غير المدفوعة، من كل الشهور.</span></p>
+    <table class="data" id="mOffen"><thead><tr><th style="width:74px">Nr.</th><th style="width:86px">Datum</th>
+      <th>Kunde</th><th style="width:96px">Fällig</th><th style="width:90px">Status</th>
+      <th class="r" style="width:100px">Betrag</th></tr></thead><tbody></tbody></table></div>
   <div class="card"><h3>Wareneinkauf im Monat</h3>
     <p class="hint" style="margin-top:-8px">Getrennt vom Umsatz — Einkäufe gehören nicht ins
       Rechnungsausgangsbuch.
@@ -599,6 +619,10 @@ table.data tr.tot td{font-weight:700;border-top:2px solid var(--ink);border-bott
   <div class="card"><h3>Nach Steuerfall</h3>
     <table class="data" id="bSteuer"><thead><tr><th>Steuerfall</th><th class="r">Anzahl</th>
       <th class="r">Netto</th><th class="r">USt.</th><th class="r">Brutto</th></tr></thead><tbody></tbody></table></div>
+  <div class="card"><h3>Offene Rechnungen</h3>
+    <table class="data" id="bOffen"><thead><tr><th style="width:74px">Nr.</th><th style="width:86px">Datum</th>
+      <th>Kunde</th><th style="width:96px">Fällig</th><th style="width:90px">Status</th>
+      <th class="r" style="width:100px">Betrag</th></tr></thead><tbody></tbody></table></div>
   <div class="card"><h3>Wareneinkauf im Monat</h3>
     <table class="data" id="bEink"><thead><tr><th>Herkunft</th><th class="r">Belege</th>
       <th class="r">Summe</th></tr></thead><tbody></tbody></table></div>
@@ -733,6 +757,9 @@ const Local={
   async load(){ try{const r=localStorage.getItem(LKEY);return r?JSON.parse(r):null;}catch(e){return null;} },
   async saveSet(){ this._w(); }, async saveKunden(){ this._w(); },
   async addRechnung(r){ DB.rechnungen.unshift(r); this._w(); },
+  async updRechnung(r){ const i=DB.rechnungen.findIndex(
+      x=>x.nr===r.nr&&(x.typ||"rechnung")===(r.typ||"rechnung"));
+    if(i>=0) DB.rechnungen[i]=r; this._w(); },
   async delRechnung(rec){ DB.rechnungen=DB.rechnungen.filter(
       x=>!(x.nr===rec.nr&&(x.typ||"rechnung")===(rec.typ||"rechnung"))); this._w(); },
   async nextNr(){ const n=DB.set.next; DB.set.next=n+1; this._w(); return n; },
@@ -769,6 +796,10 @@ const Cloud={
   async addRechnung(r){ const {doc,setDoc}=FB.fs;
     await setDoc(doc(FB.db,"rechnungen",docId(r)),r);
     DB.rechnungen.unshift(r); },
+  async updRechnung(r){ const {doc,setDoc}=FB.fs;
+    await setDoc(doc(FB.db,"rechnungen",docId(r)),r);
+    const i=DB.rechnungen.findIndex(x=>x.nr===r.nr&&(x.typ||"rechnung")===(r.typ||"rechnung"));
+    if(i>=0) DB.rechnungen[i]=r; },
   async delRechnung(rec){ const {doc,deleteDoc}=FB.fs;
     await deleteDoc(doc(FB.db,"rechnungen",docId(rec)));
     DB.rechnungen=DB.rechnungen.filter(x=>!(x.nr===rec.nr&&(x.typ||"rechnung")===(rec.typ||"rechnung"))); },
@@ -977,6 +1008,56 @@ function refreshNeu(){
 $("#n_land").onchange=refreshNeu;
 $("#payPick").onchange=refreshNeu;
 
+
+/* ---- Eingabe-Vorgaben merken (nur auf diesem Gerät) ---- */
+const UIKEY="salha_ui_v1";
+function aktZahl(){ const r=$$('input[name=zahl]').find(x=>x.checked); return r?r.value:ZAHLUNG[0]; }
+function aktGar(){ const r=$$('input[name=garantie]').find(x=>x.checked); return r?r.value:"6"; }
+function uiSpeichern(){
+  try{ localStorage.setItem(UIKEY, JSON.stringify({
+    zahl:aktZahl(), gar:aktGar(), datum:$("#n_datum").value,
+    bez:istBezahltUI()?"ja":"nein", ziel:$("#n_zieltage").value })); }catch(e){}
+}
+function uiLaden(){
+  let v={}; try{ v=JSON.parse(localStorage.getItem(UIKEY)||"{}"); }catch(e){}
+  if(v.zahl) $$('input[name=zahl]').forEach(r=>r.checked=(r.value===v.zahl));
+  if(v.gar)  $$('input[name=garantie]').forEach(r=>r.checked=(r.value===v.gar));
+  if(v.datum) $("#n_datum").value=v.datum;
+  if(v.bez)  $$('input[name=bezahlt]').forEach(r=>r.checked=(r.value===v.bez));
+  if(v.ziel) $("#n_zieltage").value=v.ziel;
+  datumPruefen(); statusUI();
+}
+// Warnt sichtbar, wenn das Rechnungsdatum nicht der heutige Tag ist
+function datumPruefen(){
+  const w=$("#datumWarn"); if(!w) return;
+  const d=$("#n_datum").value;
+  const anders = d && d!==heute();
+  w.style.display = anders?"":"none";
+  if(anders) w.textContent="Nicht heute — "+dDE(d);
+}
+$("#payPick").addEventListener("change",uiSpeichern);
+$("#garPick").addEventListener("change",uiSpeichern);
+$("#n_datum").addEventListener("change",()=>{datumPruefen();uiSpeichern();});
+
+
+/* ---- Zahlungsstatus: bezahlt oder offen ---- */
+function istBezahltUI(){ const r=$$('input[name=bezahlt]').find(x=>x.checked); return !r || r.value==="ja"; }
+function faelligBerechnen(){
+  const tage=Math.max(0,Math.round(parseNum($("#n_zieltage").value)||0));
+  const d=new Date(($("#n_datum").value||heute())+"T12:00:00");
+  d.setDate(d.getDate()+tage);
+  $("#n_faellig").value=d.toISOString().slice(0,10);
+}
+function statusUI(){
+  const offen=!istBezahltUI();
+  $("#zielWrap").style.display = offen?"":"none";
+  if(offen && !$("#n_faellig").value) faelligBerechnen();
+  uiSpeichern();
+}
+$("#statusPick").addEventListener("change",statusUI);
+$("#n_zieltage").addEventListener("input",faelligBerechnen);
+$("#n_datum").addEventListener("change",()=>{ if(!istBezahltUI()) faelligBerechnen(); });
+
 $("#nSave").onclick=async()=>{
   const name=$("#n_name").value.trim(); if(!name) return toast("Name fehlt");
   const pos=lesePos(); if(!pos.length) return toast("Mindestens eine Position mit Preis");
@@ -991,6 +1072,9 @@ $("#nSave").onclick=async()=>{
     const rec={nr,prefix:DB.set.prefix||"",datum,monat:datum.slice(0,7),
       zahlung:$$('input[name=zahl]').find(r=>r.checked).value,
       garantie:$$('input[name=garantie]').find(r=>r.checked).value,
+      bezahlt: istBezahltUI(),
+      faellig: istBezahltUI() ? "" : ($("#n_faellig").value||datum),
+      bezahltAm: istBezahltUI() ? datum : "",
       name,ref:$("#n_ref").value.trim(),str:$("#n_str").value.trim(),plz:$("#n_plz").value.trim(),
       ort:$("#n_ort").value.trim(),land:$("#n_land").value,tel:$("#n_tel").value.trim(),ustid,
       pos,versand,satz:st.satz,art:st.art,kurz:st.kurz,hinweis:st.hinweis,
@@ -999,8 +1083,7 @@ $("#nSave").onclick=async()=>{
     ["n_name","n_ref","n_str","n_plz","n_ort","n_tel","n_ustid","n_paste"].forEach(i=>$("#"+i).value="");
     $("#n_versand").value="0,00"; $("#nPos tbody").innerHTML=""; posRow();
     $$('input[name=tax]').forEach(r=>r.checked=(r.value==="auto"));
-    $$('input[name=garantie]').forEach(r=>r.checked=(r.value==="6"));
-    $("#n_hinweis").value=""; taxUI();
+    $("#n_hinweis").value=""; taxUI(); uiSpeichern(); datumPruefen();
     updateNext(); renderListe();
     druck([rec.nr]);
     toast("Rechnung "+(DB.set.prefix||"")+nr+" erstellt");
@@ -1412,13 +1495,16 @@ function fillMonatSelects(){
   f.innerHTML=`<option value="">Alle Monate</option>`+opts; if(v) f.value=v;
   const z=$("#fZahl");
   if(!z.dataset.done){ z.innerHTML=`<option value="">Alle Zahlungsarten</option>`+
+    `<option value="__offen">Nur offene Rechnungen</option>`+
     ZAHLUNG.map(x=>`<option>${x}</option>`).join(""); z.dataset.done="1"; }
 }
 function renderListe(){
   fillMonatSelects();
   const q=norm($("#q").value), fm=$("#fMonat").value, fz=$("#fZahl").value;
-  const rows=DB.rechnungen.filter(r=>(!fm||r.monat===fm)&&(!fz||r.zahlung===fz)&&
+  const rows=DB.rechnungen.filter(r=>(!fm||r.monat===fm)&&
+    (!fz || (fz==="__offen" ? r.bezahlt===false : r.zahlung===fz))&&
     (!q||[r.nr,r.name,r.ref].some(v=>norm(v).includes(q))));
+  updateNext();
   $("#tab tbody").innerHTML = rows.length ? rows.map(r=>`<tr>
     <td><input type="checkbox" data-nr="${r.nr}" data-typ="${istGut(r)?"gutschrift":"rechnung"}"></td>
     <td class="m" style="color:${istGut(r)?"var(--lila)":"var(--gruen)"};font-weight:600">
@@ -1426,16 +1512,21 @@ function renderListe(){
     <td class="m">${dDE(r.datum)}</td>
     <td>${esc(r.name)} <span class="tag">${esc(r.land)}</span>
       ${istGut(r)?`<div class="hint">zu Rechnung ${esc((r.bezugPrefix||"")+r.bezugNr)}${r.extern?" (extern)":""}</div>`:""}</td>
-    <td><span class="tag">${esc(r.zahlung)}</span></td>
+    <td>${r.bezahlt===false
+        ? `<span class="tag" style="background:#FDECEC;color:var(--rot);font-weight:600">OFFEN</span>
+           <div class="hint">fällig ${dDE(r.faellig||r.datum)}</div>`
+        : `<span class="tag">${esc(r.zahlung)}</span>`}</td>
     <td style="color:var(--steel)">${esc(r.kurz)}</td>
     <td class="r m">${eur(r.netto)}</td><td class="r m">${eur(r.brutto)}</td>
     <td class="r"><button class="btn quiet" data-p="${r.nr}" data-t="${istGut(r)?"g":"r"}" style="padding:4px 10px;font-size:13px">Drucken</button>
       ${istGut(r)?"":`<button class="btn quiet" data-o="${r.nr}" style="padding:4px 10px;font-size:13px">ODS</button>`}
+      ${(!istGut(r)&&r.bezahlt===false)?`<button class="btn quiet" data-b="${r.nr}" style="padding:4px 10px;font-size:13px;border-color:var(--gruen);color:var(--gruen)">Bezahlt</button>`:""}
       <button class="icon" data-d="${r.nr}" data-t="${istGut(r)?"g":"r"}" title="Löschen">✕</button></td></tr>`).join("")
     : `<tr><td colspan="9" class="empty">Keine Rechnungen</td></tr>`;
   $$("#tab button[data-p]").forEach(b=>b.onclick=()=>
     druck([{nr:+b.dataset.p, typ:b.dataset.t==="g"?"gutschrift":"rechnung"}]));
   $$("#tab button[data-o]").forEach(b=>b.onclick=()=>odsDownload(+b.dataset.o));
+  $$("#tab button[data-b]").forEach(b=>b.onclick=()=>alsBezahlt(+b.dataset.b));
   $$("#tab button[data-d]").forEach(b=>b.onclick=()=>
     storno(+b.dataset.d, b.dataset.t==="g"?"gutschrift":"rechnung"));
 }
@@ -1443,6 +1534,18 @@ function renderListe(){
 $("#printSel").onclick=()=>{
   const n=$$("#tab input:checked").map(c=>({nr:+c.dataset.nr, typ:c.dataset.typ||"rechnung"}));
   n.length?druck(n):toast("Nichts ausgewählt");};
+async function alsBezahlt(nr){
+  const r=DB.rechnungen.find(x=>x.nr===nr&&!istGut(x));
+  if(!r) return;
+  const art=prompt("Wie wurde Rechnung "+((r.prefix||"")+r.nr)+" bezahlt?\n\n"+ZAHLUNG.join(" / "), r.zahlung||ZAHLUNG[0]);
+  if(art===null) return;
+  const gefunden=ZAHLUNG.find(z=>z.toLowerCase()===String(art).trim().toLowerCase());
+  if(!gefunden) return toast("Unbekannte Zahlungsart — bitte genau schreiben");
+  const kopie=Object.assign({},r,{bezahlt:true, zahlung:gefunden, bezahltAm:heute()});
+  try{ await Store.updRechnung(kopie); renderListe();
+       toast("Rechnung "+r.nr+" als bezahlt markiert ("+gefunden+")"); }
+  catch(e){ toast("Fehler: "+(e.message||e)); }
+}
 async function storno(nr,typ){
   typ=typ||"rechnung";
   const was = typ==="gutschrift" ? "Gutschrift" : "Rechnung";
@@ -1473,9 +1576,26 @@ function einkaufMonat(monat){
   });
   return {es,grp,summe:r2(summe)};
 }
+function offenePosten(){
+  const offen=DB.rechnungen.filter(r=>!istGut(r)&&r.bezahlt===false);
+  const summe=r2(offen.reduce((a,r)=>a+r.brutto,0));
+  return {offen,summe};
+}
 function renderAusw(monat,pref){
   const a=auswertung(monat);
   const ek=einkaufMonat(monat);
+  const op=offenePosten();
+  const to=$("#"+pref+"Offen");
+  if(to) to.querySelector("tbody").innerHTML = op.offen.length
+    ? op.offen.slice().sort((x,y)=>(x.faellig||"").localeCompare(y.faellig||"")).map(r=>{
+        const spaet = (r.faellig||"") && r.faellig < heute();
+        return `<tr><td class="m">${esc((r.prefix||"")+r.nr)}</td><td class="m">${dDE(r.datum)}</td>
+          <td>${esc(r.name)}</td><td class="m">${dDE(r.faellig||r.datum)}</td>
+          <td>${spaet?`<span class="tag" style="background:#FDECEC;color:var(--rot);font-weight:600">überfällig</span>`
+                     :`<span class="tag">offen</span>`}</td>
+          <td class="r m">${eur(r.brutto)}</td></tr>`;}).join("")
+      +`<tr class="tot"><td colspan="5">Summe offen</td><td class="r m">${eur(op.summe)}</td></tr>`
+    : `<tr><td colspan="6" class="empty">Keine offenen Rechnungen</td></tr>`;
   const te=$("#"+pref+"Eink");
   if(te) te.querySelector("tbody").innerHTML = Object.keys(ek.grp).length
     ? Object.entries(ek.grp).map(([k,v])=>`<tr><td>${esc(k)}</td><td class="r m">${v.c}</td>
@@ -1534,7 +1654,7 @@ $("#bAll").onclick=()=>{const a=auswertung($("#bMonat").value);
 
 function csv(monat){
   const a=auswertung(monat);
-  const head=["Art","Nummer","Bezug","Datum","Kunde","Land","USt-IdNr","Zahlungsart","Steuerfall","Satz","Netto","USt","Brutto"];
+  const head=["Art","Nummer","Bezug","Datum","Kunde","Land","USt-IdNr","Zahlungsart","Status","Fällig","Steuerfall","Satz","Netto","USt","Brutto"];
   const q=v=>'"'+String(v==null?"":v).replace(/"/g,'""')+'"';
   const rangC=r=>istGut(r)?1:0;
   const lines=[head.join(";")].concat(a.rs.slice().sort((x,y)=>
@@ -1651,7 +1771,12 @@ $("#impJson").onchange=e=>{const f=e.target.files[0];if(!f)return;const rd=new F
       fillSet();renderKunden();renderListe();toast("Sicherung geladen");
     }catch(x){toast("Datei nicht lesbar");}};
   rd.readAsText(f); e.target.value="";};
-function updateNext(){ $("#nextNr").textContent="Nr. "+(DB.set.prefix||"")+DB.set.next; }
+function updateNext(){
+  const op=DB.rechnungen.filter(r=>!istGut(r)&&r.bezahlt===false);
+  const s=r2(op.reduce((a,r)=>a+r.brutto,0));
+  $("#nextNr").innerHTML="Nr. "+(DB.set.prefix||"")+DB.set.next
+    + (op.length?` · <span style="color:var(--rot);font-weight:600">${op.length} offen ${eur(s)}</span>`:"");
+}
 
 /* ---------- Druck ---------- */
 function bogen(r){
@@ -1698,7 +1823,17 @@ function bogen(r){
       ${r.garantie?`<div class="l2">Garantie ${esc(r.garantie)} Monate</div>`:""}
       <div class="l3">${esc(S.f3)}</div>
       ${String(S.f4||"").split("\n").map(l=>`<div class="l4">${esc(l)}</div>`).join("")}
-      <div class="l5">ZAHLUNG&nbsp; ${esc(r.zahlung)}<br>${esc(S.f5)}</div></div></div>`;
+      ${r.bezahlt===false
+        ? `<div style="margin-top:6mm;border:1.5pt solid #D4322B;padding:3mm;text-align:center">
+             <div style="font-size:11pt;font-weight:bold;color:#D4322B">NOCH NICHT BEZAHLT</div>
+             <div style="font-size:9pt;margin-top:1.5mm">Zahlbar ohne Abzug bis
+               <b>${dDE(r.faellig||r.datum)}</b> auf das unten genannte Konto.</div>
+             <div style="font-size:8.5pt;margin-top:1mm">Bitte geben Sie bei der Überweisung die
+               Rechnungsnummer <b>${esc((r.prefix||"")+r.nr)}</b> an.</div>
+           </div>
+           <div class="l5" style="margin-top:5mm">${esc(S.f5)}</div>`
+        : `<div class="l5">ZAHLUNG&nbsp; ${esc(r.zahlung)}<br>${esc(S.f5)}</div>`}
+      </div></div>`;
 }
 // Der Browser benutzt document.title als Dateinamen beim "Als PDF speichern".
 function mitDruckTitel(titel,fn){
@@ -1790,15 +1925,17 @@ function journal(monat){
       (x.datum||"").localeCompare(y.datum||"") || rang(x)-rang(y) || x.nr-y.nr
     ).map(r=>`<tr>
     <td>${istGut(r)?"G ":""}${esc((r.prefix||"")+r.nr)}</td><td>${dDE(r.datum)}</td><td>${esc(r.name)}</td>
-    <td>${esc(r.land)}</td><td>${esc(r.ustid||"")}</td><td>${esc(r.zahlung)}</td><td>${istGut(r)?"Gutschrift zu "+esc((r.bezugPrefix||"")+r.bezugNr):esc(r.kurz)}</td>
+    <td>${esc(r.land)}</td><td>${esc(r.ustid||"")}</td><td>${esc(r.zahlung)}</td>
+    <td>${istGut(r)?"—":(r.bezahlt===false?"offen":"bezahlt")}</td>
+    <td>${istGut(r)?"Gutschrift zu "+esc((r.bezugPrefix||"")+r.bezugNr):esc(r.kurz)}</td>
     <td class="n">${nf.format(r.satz)} %</td><td class="n">${eur(r.netto)}</td>
     <td class="n">${eur(r.ust)}</td><td class="n">${eur(r.brutto)}</td></tr>`).join("");
   $("#out").innerHTML=`<div class="sheet journal">
     <h1>${esc(S.firma)} — Rechnungsausgangsbuch</h1>
     <div class="jm">${esc(monLabel(monat))}</div>
     <table><thead><tr><th>Nr.</th><th>Datum</th><th>Kunde</th><th>Land</th><th>USt-IdNr.</th>
-      <th>Zahlung</th><th>Steuerfall</th><th>Satz</th><th>Netto</th><th>USt.</th><th>Brutto</th></tr></thead>
-      <tbody>${rows}<tr class="tot"><td colspan="8">Summe ${a.anzR} Rechnungen${a.anzG?" und "+a.anzG+" Gutschriften":""}</td>
+      <th>Zahlung</th><th>Status</th><th>Steuerfall</th><th>Satz</th><th>Netto</th><th>USt.</th><th>Brutto</th></tr></thead>
+      <tbody>${rows}<tr class="tot"><td colspan="9">Summe ${a.anzR} Rechnungen${a.anzG?" und "+a.anzG+" Gutschriften":""}</td>
       <td class="n">${eur(a.n)}</td><td class="n">${eur(a.u)}</td><td class="n">${eur(a.b)}</td></tr></tbody></table>
     <h5>Aufteilung nach Steuerfall</h5>
     <table><thead><tr><th>Steuerfall</th><th>Anzahl</th><th>Netto</th><th>USt.</th><th>Brutto</th></tr></thead><tbody>
@@ -1999,7 +2136,7 @@ async function starten(){
     DB.einkauf=Array.isArray(d.einkauf)?d.einkauf:[]; }
   if(DB.set.logo) LOGO=DB.set.logo;
   $("#brandLogo").src=LOGO; $("#gateLogo").src=LOGO; logoVorschau();
-  buildNav(); fillSet(); renderKunden(); renderListe(); posRow(); taxUI();
+  buildNav(); fillSet(); renderKunden(); renderListe(); posRow(); taxUI(); uiLaden();
   if(ROLE!=="berater") einkInit();
   if(ROLE==="berater") renderBerater();
   if(ROLE!=="berater" && !DB.set.ustid){
