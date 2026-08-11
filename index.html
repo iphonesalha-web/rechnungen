@@ -341,6 +341,11 @@ table.data tr.tot td{font-weight:700;border-top:2px solid var(--ink);border-bott
   <p class="sub">Rückerstattung an einen Kunden — z. B. bei Rückgabe eines Teils.
     <span class="ar">إشعار دائن للزبون عند إرجاع قطعة واسترداد المبلغ.</span></p>
 
+  <div class="note" id="editGutBanner" style="display:none;border-color:var(--blau);background:#F2F5FD">
+    <b id="editGutText"></b>
+    <button class="btn quiet" id="editGutAbbruch" style="margin-left:14px;padding:4px 12px;font-size:13px">Abbrechen</button>
+  </div>
+
   <div class="card"><h3>Ursprungsrechnung</h3>
     <div class="pay" id="g_modus" style="margin-bottom:16px">
       <label><input type="radio" name="gmodus" value="auto" checked><span>Aus dem System</span></label>
@@ -415,7 +420,8 @@ table.data tr.tot td{font-weight:700;border-top:2px solid var(--ink);border-bott
     <div class="grid g3">
       <label><span>Gutschriftsdatum</span><input id="g_datum" type="date"></label>
       <label><span>Rückzahldatum</span><input id="g_rueck" type="date"></label>
-      <label><span>Rückzahlung per</span><select id="g_zahl"></select></label>
+      <label><span>Rückzahlung per</span><select id="g_zahl"></select>
+        <span class="hint" id="g_zahlHinweis"></span></label>
     </div>
     <label style="margin-top:14px"><span>Anmerkungen oder besondere Anweisungen</span>
       <input id="g_grund" placeholder="z. B. Rückgabe – Teil passt nicht"></label>
@@ -1404,6 +1410,9 @@ function gutLaden(){
     ${bereits>0?`<div class="note" style="margin-bottom:0">Für diese Rechnung wurden bereits
       ${eur(bereits)} gutgeschrieben (${schon.length} Gutschrift${schon.length>1?"en":""}).
       Rechnungsbetrag: ${eur(r.brutto)}.</div>`:""}`;
+  if($("#g_zahl").options.length) $("#g_zahl").value=r.zahlung;
+  if($("#g_zahlHinweis")) $("#g_zahlHinweis").textContent=
+    "Übernommen von Rechnung "+(r.prefix||"")+r.nr+" — bezahlt per "+r.zahlung+".";
   const tb=$("#gPos tbody"); tb.innerHTML="";
   r.pos.forEach(pz=>gutRow(pz.qty, pz.title+(pz.sku?" ("+pz.sku+")":""), pz.brutto));
   if(r.versand>0) gutRow(1,"Versandkosten",r.versand);
@@ -1445,6 +1454,85 @@ function gutSumme(){
     : "Noch nichts ausgewählt";
   return {pos,netto:n,ust:mw,brutto,satz};
 }
+
+/* ---- Gutschrift bearbeiten — nur am Tag der Ausstellung ---- */
+let EDIT_GUT_NR=null;
+function darfBearbeitenGut(r){ return istGut(r) && tagVon(r.erstellt)===heute(); }
+function editGutUI(){
+  const an=EDIT_GUT_NR!==null;
+  $("#editGutBanner").style.display = an?"":"none";
+  $("#gSave").textContent = an ? "Änderung speichern" : "Gutschrift erstellen";
+  if(an) $("#editGutText").textContent="Gutschrift "+EDIT_GUT_NR+" wird bearbeitet — die Nummer bleibt gleich.";
+}
+$("#editGutAbbruch").onclick=()=>{ EDIT_GUT_NR=null; gFormLeeren(); editGutUI(); toast("Bearbeitung abgebrochen"); };
+
+function gFormLeeren(){
+  $$('input[name=gmodus]').forEach(r=>r.checked=(r.value==="auto"));
+  G_QUELLE=null;
+  $("#g_grund").value=""; $("#g_rueck").value=""; $("#g_datum").value="";
+  ["gm_nr","gm_name","gm_str","gm_plz","gm_ort","gm_tel","gm_ustid","gm_hinweis","gm_paste"]
+    .forEach(i=>{ if($("#"+i)) $("#"+i).value=""; });
+  $("#gPos tbody").innerHTML="";
+  gModusUI();
+}
+
+function bearbeitenGutschrift(nr){
+  const r=DB.rechnungen.find(x=>x.nr===nr&&istGut(x));
+  if(!r) return;
+  if(!darfBearbeitenGut(r)) return toast("Nur am Ausstellungstag änderbar");
+  EDIT_GUT_NR=nr;
+
+  const quelle = !r.extern ? nurRechnungen().find(x=>x.nr===r.bezugNr) : null;
+  if(quelle){
+    $$('input[name=gmodus]').forEach(x=>x.checked=(x.value==="auto"));
+    gModusUI();
+    if(!$("#g_rech").options.length || ![...$("#g_rech").options].some(o=>+o.value===quelle.nr)) gutInit();
+    $("#g_rech").value=quelle.nr;
+    G_QUELLE=quelle;
+    $("#g_zahlHinweis").textContent="Übernommen von Rechnung "+(quelle.prefix||"")+quelle.nr+
+      " — bezahlt per "+quelle.zahlung+".";
+    const schon=DB.rechnungen.filter(x=>istGut(x)&&x.bezugNr===quelle.nr&&x.nr!==r.nr);
+    const bereits=schon.reduce((a,x)=>a+Math.abs(x.brutto),0);
+    $("#g_info").innerHTML=`
+      <div class="row" style="gap:22px;align-items:flex-start">
+        <div><b>${esc(quelle.name)}</b><div class="hint">${esc([quelle.str,ortZeile(quelle.plz,quelle.ort,quelle.land),landName(quelle.land)].filter(Boolean).join(" · "))}</div></div>
+        <div style="margin-left:auto;text-align:right">
+          <span class="stamp ${quelle.art}"><b>${esc(quelle.kurz)}</b><span>${nf.format(quelle.satz)} %</span></span>
+        </div>
+      </div>
+      ${bereits>0?`<div class="note" style="margin-bottom:0">Weitere Gutschriften zu dieser Rechnung: ${eur(bereits)}.</div>`:""}`;
+  }else{
+    $$('input[name=gmodus]').forEach(x=>x.checked=(x.value==="manuell"));
+    gModusUI();
+    $("#gm_nr").value=r.bezugNr||""; $("#gm_datum").value=r.bezugDatum||"";
+    const map={inland:"inland",frei:"frei",rc:"rc",export:"export",oss:"oss"};
+    $("#gm_fall").value = map[r.art] || (r.satz>0?"inland":"frei");
+    $("#gm_satz").value=nf.format(r.satz);
+    $("#gm_hinweis").value=r.hinweis||"";
+    $("#gm_waehrung").value=r.waehrung||"EUR";
+    $("#gm_kurs").value=nf.format(r.kurs||1);
+    $("#gm_name").value=r.name||""; $("#gm_tel").value=r.tel||"";
+    $("#gm_str").value=r.str||"";   $("#gm_ustid").value=r.ustid||"";
+    $("#gm_plz").value=r.plz||"";   $("#gm_ort").value=r.ort||"";
+    $("#gm_land").value=r.land||"DE";
+    gmSatzUI();
+  }
+
+  $("#g_datum").value=r.datum||heute();
+  $("#g_rueck").value=r.rueck||r.datum||heute();
+  $("#g_zahl").value=r.zahlung||ZAHLUNG[0];
+  $("#g_grund").value=r.grund||"";
+
+  $("#gPos tbody").innerHTML="";
+  (r.pos||[]).forEach(pz=>gutRow(pz.qty, pz.title, Math.abs(pz.brutto)));
+  if(!$$("#gPos tbody tr").length) gutRow(1,"",0);
+
+  gutSumme(); editGutUI();
+  $$("#nav button")[1].click();
+  window.scrollTo(0,0);
+  toast("Gutschrift "+r.nr+" geladen");
+}
+
 $("#g_rech").onchange=gutLaden;
 $("#g_laden").onclick=gutLaden;
 $("#gAdd").onclick=()=>{gutRow(1,"",0);gutSumme();};
@@ -1465,6 +1553,34 @@ $("#gSave").onclick=async()=>{
   const datum=$("#g_datum").value||heute();
   $("#gSave").disabled=true;
   try{
+    // ---- Änderung einer bestehenden Gutschrift (nur am Ausstellungstag) ----
+    if(EDIT_GUT_NR!==null){
+      const alt=DB.rechnungen.find(x=>x.nr===EDIT_GUT_NR&&istGut(x));
+      if(!alt){ EDIT_GUT_NR=null; editGutUI(); throw new Error("Gutschrift nicht mehr vorhanden"); }
+      if(!darfBearbeitenGut(alt)){ EDIT_GUT_NR=null; editGutUI(); throw new Error("Änderung nicht mehr erlaubt"); }
+      const verlauf=(alt.verlauf||[]).concat([{
+        zeit:new Date().toISOString(),
+        vorher:{name:alt.name, brutto:alt.brutto, zahlung:alt.zahlung, grund:alt.grund,
+                pos:(alt.pos||[]).map(x=>({q:x.qty,t:x.title,b:x.brutto}))}
+      }]);
+      const neu=Object.assign({},alt,{
+        datum, monat:datum.slice(0,7), rueck:$("#g_rueck").value||datum,
+        zahlung:$("#g_zahl").value, grund:$("#g_grund").value.trim(),
+        pos:pos.map(x=>({qty:x.qty,title:x.title,sku:"",brutto:x.brutto})),
+        satz, art:basis.art, kurz:basis.kurz, hinweis:basis.hinweis,
+        waehrung:(basis.waehrung||"EUR"), kurs:(basis.kurs||1),
+        nettoW:-n, ustW:-ust, bruttoW:-brutto,
+        netto:-r2(n*(basis.kurs||1)), ust:-r2(ust*(basis.kurs||1)),
+        brutto:-r2(brutto*(basis.kurs||1)),
+        geaendert:new Date().toISOString(), verlauf});
+      await Store.updRechnung(neu);
+      const nrAlt=EDIT_GUT_NR; EDIT_GUT_NR=null;
+      gFormLeeren(); editGutUI(); renderListe();
+      druck([{nr:nrAlt, typ:"gutschrift"}]);
+      toast("Gutschrift "+nrAlt+" geändert");
+      $("#gSave").disabled=false;
+      return;
+    }
     const nr=await Store.nextGutNr();
     const rec={typ:"gutschrift", nr, prefix:"", datum, monat:datum.slice(0,7),
       rueck:$("#g_rueck").value||datum,
@@ -1818,7 +1934,8 @@ function renderListe(){
     <td class="r"><button class="btn quiet" data-p="${r.nr}" data-t="${istGut(r)?"g":"r"}" style="padding:4px 10px;font-size:13px">Drucken</button>
       ${istGut(r)?"":`<button class="btn quiet" data-o="${r.nr}" style="padding:4px 10px;font-size:13px">ODS</button>`}
       ${(!istGut(r)&&r.bezahlt===false)?`<button class="btn quiet" data-b="${r.nr}" style="padding:4px 10px;font-size:13px;border-color:var(--gruen);color:var(--gruen)">Bezahlt</button>`:""}
-      ${darfBearbeiten(r)?`<button class="btn quiet" data-e="${r.nr}" style="padding:4px 10px;font-size:13px;border-color:var(--blau);color:var(--blau)">Ändern</button>`:""}
+      ${(!istGut(r)&&darfBearbeiten(r))?`<button class="btn quiet" data-e="${r.nr}" style="padding:4px 10px;font-size:13px;border-color:var(--blau);color:var(--blau)">Ändern</button>`:""}
+      ${(istGut(r)&&darfBearbeitenGut(r))?`<button class="btn quiet" data-eg="${r.nr}" style="padding:4px 10px;font-size:13px;border-color:var(--blau);color:var(--blau)">Ändern</button>`:""}
       <button class="icon" data-d="${r.nr}" data-t="${istGut(r)?"g":"r"}" title="Löschen">✕</button></td></tr>`).join("")
     : `<tr><td colspan="9" class="empty">Keine Rechnungen</td></tr>`;
   $$("#tab button[data-p]").forEach(b=>b.onclick=()=>
@@ -1826,6 +1943,7 @@ function renderListe(){
   $$("#tab button[data-o]").forEach(b=>b.onclick=()=>odsDownload(+b.dataset.o));
   $$("#tab button[data-b]").forEach(b=>b.onclick=()=>alsBezahlt(+b.dataset.b));
   $$("#tab button[data-e]").forEach(b=>b.onclick=()=>bearbeiten(+b.dataset.e));
+  $$("#tab button[data-eg]").forEach(b=>b.onclick=()=>bearbeitenGutschrift(+b.dataset.eg));
   $$("#tab button[data-d]").forEach(b=>b.onclick=()=>
     storno(+b.dataset.d, b.dataset.t==="g"?"gutschrift":"rechnung"));
 }
