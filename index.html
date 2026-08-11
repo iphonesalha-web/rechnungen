@@ -227,6 +227,20 @@ table.data tr.tot td{font-weight:700;border-top:2px solid var(--ink);border-bott
     <div class="pay" id="payPick"></div>
   </div>
 
+  <div class="card"><h3>Währung</h3>
+    <div class="grid g3">
+      <label><span>Rechnungswährung</span><select id="n_waehrung"></select></label>
+      <label id="kursWrap" style="display:none"><span>Kurs — 1 Einheit = ? EUR</span>
+        <input id="n_kurs" class="num" value="1,00"></label>
+      <label id="kursInfo" style="display:none"><span>Entspricht in EUR</span>
+        <input id="n_eurAnzeige" class="num" readonly style="background:var(--paper)"></label>
+    </div>
+    <div class="note" id="kursHinweis" style="display:none">Für die Buchhaltung wird der EUR-Betrag
+      gespeichert. Umsatzsteuer muss laut § 14 UStG zusätzlich in Euro angegeben werden — das erledigt
+      die Rechnung automatisch. Kurs vom Zahlungstag verwenden und Nachweis aufbewahren.
+      <span class="ar">المحاسبة تُحفظ باليورو. سعر الصرف: استعمل سعر يوم الدفع واحفظ الإثبات.</span></div>
+  </div>
+
   <div class="card"><h3>Zahlungsstatus</h3>
     <div class="pay" id="statusPick">
       <label><input type="radio" name="bezahlt" value="ja" checked><span>Bezahlt</span></label>
@@ -344,7 +358,10 @@ table.data tr.tot td{font-weight:700;border-top:2px solid var(--ink);border-bott
       <div class="row" style="margin-top:14px">
         <label style="max-width:150px" id="gm_satzWrap"><span>Satz %</span>
           <input id="gm_satz" class="num" value="19"></label>
-        <label style="flex:1;min-width:240px"><span>Hinweis auf der Gutschrift</span>
+        <label style="max-width:170px"><span>Währung</span><select id="gm_waehrung"></select></label>
+        <label style="max-width:180px" id="gmKursWrap" style="display:none"><span>Kurs = ? EUR</span>
+          <input id="gm_kurs" class="num" value="1,00"></label>
+        <label style="flex:1;min-width:220px"><span>Hinweis auf der Gutschrift</span>
           <input id="gm_hinweis" list="hinweise" placeholder="optional"></label>
       </div>
       <div class="grid g2" style="margin-top:16px">
@@ -700,6 +717,16 @@ function ortZeile(plz,ort,land){
   return ORT_ZUERST.includes(land) ? [ort,plz].filter(Boolean).join(" ") : a.join(" ");
 }
 const ZAHLUNG=["PayPal","Sparkasse","D-Bank","Barzahlung","eBay"];
+const WAEHRUNGEN=[["EUR","Euro"],["CHF","Schweizer Franken"],["GBP","Britisches Pfund"],
+  ["USD","US-Dollar"],["PLN","Polnischer Zloty"],["SEK","Schwedische Krone"],
+  ["DKK","Dänische Krone"],["NOK","Norwegische Krone"],["CZK","Tschechische Krone"],
+  ["HUF","Ungarischer Forint"]];
+// Betrag in beliebiger Währung formatieren
+function betrag(n,w){
+  w=w||"EUR";
+  if(w==="EUR") return eur(n);
+  return nf.format(+n||0)+" "+w;
+}
 
 function steuerFall(code,ustid,zahlung){
   const S=DB.set, satz=+S.satz||19;
@@ -903,9 +930,18 @@ const CODE_BY_NAME={};
 Object.entries(LAND).forEach(([c,n])=>CODE_BY_NAME[norm(n)]=c);
 Object.assign(CODE_BY_NAME,{germany:"DE",deutschland:"DE",allemagne:"DE",france:"FR",frankreich:"FR",
   austria:"AT",oesterreich:"AT","österreich":"AT",switzerland:"CH",suisse:"CH",schweiz:"CH",
-  netherlands:"NL",nederland:"NL","united kingdom":"GB","great britain":"GB",uk:"GB",
-  england:"GB",scotland:"GB",wales:"GB","northern ireland":"GB",grossbritannien:"GB",
-  "großbritannien":"GB",vereinigtes:"GB",ireland:"IE",irland:"IE",belgium:"BE",belgique:"BE",italy:"IT",italia:"IT",spain:"ES",
+  netherlands:"NL",nederland:"NL",
+  // Großbritannien — eBay schreibt je nach Sprache anders
+  "united kingdom":"GB","great britain":"GB",uk:"GB","u.k.":"GB",
+  "vereinigtes königreich":"GB","vereinigtes koenigreich":"GB","vereinigtes königreich (uk)":"GB",
+  grossbritannien:"GB","großbritannien":"GB",england:"GB",scotland:"GB",schottland:"GB",
+  wales:"GB","northern ireland":"GB",nordirland:"GB","royaume-uni":"GB",
+  ireland:"IE",irland:"IE",
+  // weitere mehrteilige Namen
+  "vereinigte staaten":"US","vereinigte staaten von amerika":"US","united states of america":"US",
+  "vereinigte arabische emirate":"AE","united arab emirates":"AE",
+  "tschechische republik":"CZ",tschechien:"CZ","saudi arabien":"SA","saudi-arabien":"SA",
+  "neuseeland":"NZ","new zealand":"NZ",belgium:"BE",belgique:"BE",italy:"IT",italia:"IT",spain:"ES",
   espana:"ES","españa":"ES",poland:"PL",polska:"PL","united kingdom":"GB","great britain":"GB",
   lebanon:"LB",liban:"LB","united states":"US",usa:"US",czechia:"CZ","czech republic":"CZ",
   denmark:"DK",danmark:"DK",sweden:"SE",sverige:"SE",luxembourg:"LU",hungary:"HU",magyarorszag:"HU"});
@@ -931,10 +967,35 @@ function parseAdresse(text){
   // E-Mail entfernen
   lines=lines.filter(l=>!/^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i.test(l));
 
-  // Land
+  // Land — erst exakt, dann als Teil der Zeile (z. B. "..., Vereinigtes Königreich")
+  function landAusZeile(z){
+    const n=norm(z);
+    if(CODE_BY_NAME[n]) return CODE_BY_NAME[n];
+    if(/^[A-Z]{2}$/.test(z.trim()) && LAND[z.trim()]) return z.trim();
+    let treffer=null, laenge=0;
+    for(const [name,code] of Object.entries(CODE_BY_NAME)){
+      if(name.length<5 || name.length<=laenge) continue;
+      const i=n.indexOf(name);
+      if(i<0) continue;
+      const vor=i===0?" ":n[i-1], nach=(i+name.length>=n.length)?" ":n[i+name.length];
+      if(/[a-zà-ÿ0-9]/.test(vor)||/[a-zà-ÿ0-9]/.test(nach)) continue; // nur ganze Wörter
+      treffer=code; laenge=name.length;
+    }
+    return treffer;
+  }
   for(let i=lines.length-1;i>=0;i--){
-    const c=CODE_BY_NAME[norm(lines[i])] || (/^[A-Z]{2}$/.test(lines[i])&&LAND[lines[i]]?lines[i]:null);
-    if(c){ res.land=c; lines.splice(i,1); break; }
+    const c=landAusZeile(lines[i]);
+    if(c){
+      res.land=c;
+      // Steht das Land am Ende einer längeren Zeile, nur diesen Teil entfernen
+      const rest=lines[i].replace(new RegExp("[,;\\s]*"+
+        Object.entries(CODE_BY_NAME).filter(([,v])=>v===c)
+          .map(([k])=>k.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")).sort((a,b)=>b.length-a.length)
+          .join("|")+"\\s*$","i"),"").trim();
+      if(rest && norm(rest)!==norm(lines[i])) lines[i]=rest.replace(/[,;]\s*$/,"");
+      else lines.splice(i,1);
+      break;
+    }
   }
   // Nachgestellte Kommas entfernen
   lines=lines.map(l=>l.replace(/[,;]\s*$/,"").trim()).filter(Boolean);
@@ -1036,8 +1097,12 @@ function refreshNeu(){
   n=r2(n+netto(parseNum($("#n_versand").value),st.satz));
   const mw=r2(n*st.satz/100);
   $("#fallBox").innerHTML=`<span class="stamp ${st.art}"><b>${esc(st.kurz)}</b><span>${esc(st.lang)}</span></span>`;
+  const w=aktWaehrung(), k=aktKurs(), ges=r2(n+mw);
+  const eurAnz=$("#n_eurAnzeige");
+  if(eurAnz) eurAnz.value = w==="EUR" ? "" : nf.format(r2(ges*k))+" EUR";
   $("#nSum").innerHTML = pos.length
-    ? `Netto <b style="font-family:var(--mono)">${eur(n)}</b> · USt. <b style="font-family:var(--mono)">${eur(mw)}</b> · Brutto <b style="font-family:var(--mono);font-size:16px">${eur(r2(n+mw))}</b>`
+    ? `Netto <b style="font-family:var(--mono)">${betrag(n,w)}</b> · USt. <b style="font-family:var(--mono)">${betrag(mw,w)}</b> · Brutto <b style="font-family:var(--mono);font-size:16px">${betrag(ges,w)}</b>`
+      + (w!=="EUR" ? ` <span class="hint">= ${eur(r2(ges*k))}</span>` : "")
     : "Noch keine Position erfasst";
 }
 ["n_land","n_ustid","n_ref","n_versand"].forEach(id=>$("#"+id).oninput=refreshNeu);
@@ -1052,7 +1117,8 @@ function aktGar(){ const r=$$('input[name=garantie]').find(x=>x.checked); return
 function uiSpeichern(){
   try{ localStorage.setItem(UIKEY, JSON.stringify({
     zahl:aktZahl(), gar:aktGar(), datum:$("#n_datum").value,
-    bez:istBezahltUI()?"ja":"nein", ziel:$("#n_zieltage").value })); }catch(e){}
+    bez:istBezahltUI()?"ja":"nein", ziel:$("#n_zieltage").value,
+    wae:aktWaehrung(), kurs:$("#n_kurs").value })); }catch(e){}
 }
 function uiLaden(){
   let v={}; try{ v=JSON.parse(localStorage.getItem(UIKEY)||"{}"); }catch(e){}
@@ -1061,7 +1127,9 @@ function uiLaden(){
   if(v.datum) $("#n_datum").value=v.datum;
   if(v.bez)  $$('input[name=bezahlt]').forEach(r=>r.checked=(r.value===v.bez));
   if(v.ziel) $("#n_zieltage").value=v.ziel;
-  datumPruefen(); statusUI();
+  if(v.wae)  $("#n_waehrung").value=v.wae;
+  if(v.kurs) $("#n_kurs").value=v.kurs;
+  datumPruefen(); statusUI(); waehrungUI();
 }
 // Warnt sichtbar, wenn das Rechnungsdatum nicht der heutige Tag ist
 function datumPruefen(){
@@ -1094,6 +1162,26 @@ $("#statusPick").addEventListener("change",statusUI);
 $("#n_zieltage").addEventListener("input",faelligBerechnen);
 $("#n_datum").addEventListener("change",()=>{ if(!istBezahltUI()) faelligBerechnen(); });
 
+
+/* ---- Währung ---- */
+function aktWaehrung(){ const e=$("#n_waehrung"); return e&&e.value?e.value:"EUR"; }
+function aktKurs(){
+  if(aktWaehrung()==="EUR") return 1;
+  const k=parseNum($("#n_kurs").value);
+  return k>0?k:1;
+}
+function waehrungUI(){
+  const fremd = aktWaehrung()!=="EUR";
+  $("#kursWrap").style.display  = fremd?"":"none";
+  $("#kursInfo").style.display  = fremd?"":"none";
+  $("#kursHinweis").style.display = fremd?"":"none";
+  refreshNeu(); uiSpeichern();
+}
+$("#n_waehrung").innerHTML=WAEHRUNGEN.map(([c,n])=>
+  `<option value="${c}">${c} — ${n}</option>`).join("");
+$("#n_waehrung").addEventListener("change",waehrungUI);
+$("#n_kurs").addEventListener("input",()=>{refreshNeu();uiSpeichern();});
+
 $("#nSave").onclick=async()=>{
   const name=$("#n_name").value.trim(); if(!name) return toast("Name fehlt");
   const pos=lesePos(); if(!pos.length) return toast("Mindestens eine Position mit Preis");
@@ -1104,8 +1192,11 @@ $("#nSave").onclick=async()=>{
   const datum=$("#n_datum").value||heute();
   $("#nSave").disabled=true;
   try{
+    const w=aktWaehrung(), kurs=aktKurs();
     const nr=await Store.nextNr();
     const rec={nr,prefix:DB.set.prefix||"",datum,monat:datum.slice(0,7),
+      waehrung:w, kurs,
+      nettoW:nett, ustW:mw, bruttoW:r2(nett+mw),
       zahlung:$$('input[name=zahl]').find(r=>r.checked).value,
       garantie:$$('input[name=garantie]').find(r=>r.checked).value,
       bezahlt: istBezahltUI(),
@@ -1114,7 +1205,8 @@ $("#nSave").onclick=async()=>{
       name,ref:$("#n_ref").value.trim(),str:$("#n_str").value.trim(),plz:$("#n_plz").value.trim(),
       ort:$("#n_ort").value.trim(),land:$("#n_land").value,tel:$("#n_tel").value.trim(),ustid,
       pos,versand,satz:st.satz,art:st.art,kurz:st.kurz,hinweis:st.hinweis,
-      netto:nett,ust:mw,brutto:r2(nett+mw),erstellt:new Date().toISOString()};
+      netto:r2(nett*kurs), ust:r2(mw*kurs), brutto:r2(r2(nett+mw)*kurs),
+      erstellt:new Date().toISOString()};
     await Store.addRechnung(rec);
     ["n_name","n_ref","n_str","n_plz","n_ort","n_tel","n_ustid","n_paste"].forEach(i=>$("#"+i).value="");
     $("#n_versand").value="0,00"; $("#nPos tbody").innerHTML=""; posRow();
@@ -1193,9 +1285,11 @@ function gutSumme(){
   n=r2(n); const mw=r2(n*satz/100);
   const brutto=r2(n+mw);
   const zuviel = basis && isFinite(basis.brutto) && brutto>Math.abs(basis.brutto)+0.009;
+  const gw=(basis&&basis.waehrung)||"EUR", gk=(basis&&basis.kurs)||1;
   $("#gSum").innerHTML = pos.length
-    ? `Netto <b style="font-family:var(--mono)">${eur(n)}</b> · USt. <b style="font-family:var(--mono)">${eur(mw)}</b>
-       · Erstattung <b style="font-family:var(--mono);font-size:16px">${eur(brutto)}</b>
+    ? `Netto <b style="font-family:var(--mono)">${betrag(n,gw)}</b> · USt. <b style="font-family:var(--mono)">${betrag(mw,gw)}</b>
+       · Erstattung <b style="font-family:var(--mono);font-size:16px">${betrag(brutto,gw)}</b>
+       ${gw!=="EUR"?`<span class="hint">= ${eur(r2(brutto*gk))}</span>`:""}
        ${zuviel?` <span style="color:var(--rot);font-weight:600">— mehr als der Rechnungsbetrag!</span>`:""}`
     : "Noch nichts ausgewählt";
   return {pos,netto:n,ust:mw,brutto,satz};
@@ -1238,8 +1332,11 @@ $("#gSave").onclick=async()=>{
       ustid:manuell ? $("#gm_ustid").value.trim() : G_QUELLE.ustid,
       pos:pos.map(x=>({qty:x.qty,title:x.title,sku:"",brutto:x.brutto})), versand:0,
       satz, art:basis.art, kurz:basis.kurz, hinweis:basis.hinweis,
-      // negativ gespeichert, damit Monatssummen korrekt gemindert werden
-      netto:-n, ust:-ust, brutto:-brutto,
+      waehrung:(basis.waehrung||"EUR"), kurs:(basis.kurs||1),
+      nettoW:-n, ustW:-ust, bruttoW:-brutto,
+      // in EUR negativ gespeichert, damit Monatssummen korrekt gemindert werden
+      netto:-r2(n*(basis.kurs||1)), ust:-r2(ust*(basis.kurs||1)),
+      brutto:-r2(brutto*(basis.kurs||1)),
       erstellt:new Date().toISOString()};
     await Store.addRechnung(rec);
     $("#g_grund").value=""; G_QUELLE=null;
@@ -1485,6 +1582,14 @@ function gmSatzUI(){
 }
 $("#g_modus").addEventListener("change",gModusUI);
 $("#gm_fall").addEventListener("change",gmSatzUI);
+if($("#gm_waehrung")){
+  $("#gm_waehrung").innerHTML=WAEHRUNGEN.map(([c,n])=>`<option value="${c}">${c}</option>`).join("");
+  $("#gm_waehrung").addEventListener("change",()=>{
+    $("#gmKursWrap").style.display = $("#gm_waehrung").value==="EUR" ? "none":"";
+    gutSumme();
+  });
+  $("#gm_kurs").addEventListener("input",gutSumme);
+}
 ["gm_satz","gm_nr"].forEach(id=>{const el=$("#"+id); if(el) el.oninput=gutSumme;});
 $("#gm_paste").addEventListener("paste",e=>{
   const t=(e.clipboardData||window.clipboardData).getData("text"); if(!t) return;
@@ -1514,6 +1619,9 @@ function gutBasis(){
     const f=$("#gm_fall").value;
     return {satz:Math.max(0,parseNum($("#gm_satz").value)), art:f, kurz:GM_KURZ[f]||"—",
             hinweis:($("#gm_hinweis").value.trim()||GM_TEXTE[f]||""),
+            waehrung:$("#gm_waehrung")?$("#gm_waehrung").value:"EUR",
+            kurs:($("#gm_waehrung")&&$("#gm_waehrung").value!=="EUR")
+                 ? (parseNum($("#gm_kurs").value)||1) : 1,
             brutto:Infinity};
   }
   return G_QUELLE;
@@ -1553,7 +1661,9 @@ function renderListe(){
            <div class="hint">fällig ${dDE(r.faellig||r.datum)}</div>`
         : `<span class="tag">${esc(r.zahlung)}</span>`}</td>
     <td style="color:var(--steel)">${esc(r.kurz)}</td>
-    <td class="r m">${eur(r.netto)}</td><td class="r m">${eur(r.brutto)}</td>
+    <td class="r m">${eur(r.netto)}</td>
+    <td class="r m">${eur(r.brutto)}${(r.waehrung&&r.waehrung!=="EUR")
+      ? `<div class="hint">${betrag(r.bruttoW!=null?r.bruttoW:r.brutto,r.waehrung)}</div>`:""}</td>
     <td class="r"><button class="btn quiet" data-p="${r.nr}" data-t="${istGut(r)?"g":"r"}" style="padding:4px 10px;font-size:13px">Drucken</button>
       ${istGut(r)?"":`<button class="btn quiet" data-o="${r.nr}" style="padding:4px 10px;font-size:13px">ODS</button>`}
       ${(!istGut(r)&&r.bezahlt===false)?`<button class="btn quiet" data-b="${r.nr}" style="padding:4px 10px;font-size:13px;border-color:var(--gruen);color:var(--gruen)">Bezahlt</button>`:""}
@@ -1690,7 +1800,7 @@ $("#bAll").onclick=()=>{const a=auswertung($("#bMonat").value);
 
 function csv(monat){
   const a=auswertung(monat);
-  const head=["Art","Nummer","Bezug","Datum","Kunde","Land","USt-IdNr","Zahlungsart","Status","Fällig","Steuerfall","Satz","Netto","USt","Brutto"];
+  const head=["Art","Nummer","Bezug","Datum","Kunde","Land","USt-IdNr","Zahlungsart","Status","Fällig","Währung","Kurs","Betrag Original","Steuerfall","Satz","Netto EUR","USt EUR","Brutto EUR"];
   const q=v=>'"'+String(v==null?"":v).replace(/"/g,'""')+'"';
   const rangC=r=>istGut(r)?1:0;
   const lines=[head.join(";")].concat(a.rs.slice().sort((x,y)=>
@@ -1817,13 +1927,17 @@ function updateNext(){
 /* ---------- Druck ---------- */
 function bogen(r){
   const S=DB.set;
+  const W=r.waehrung||"EUR", K=r.kurs||1;
+  const wNet=(r.nettoW!=null?r.nettoW:r.netto), wUst=(r.ustW!=null?r.ustW:r.ust),
+        wBru=(r.bruttoW!=null?r.bruttoW:r.brutto);
   const adr=[r.name,r.str,ortZeile(r.plz,r.ort,r.land),landName(r.land)].filter(x=>x&&String(x).trim());
   const posHTML=r.pos.map(p=>{const n=netto(p.brutto,r.satz);
     return `<tr><td class="m">${esc(p.qty)}</td>
       <td>${esc(p.title)}${p.sku?`<br><span class="sku">Art.-Nr. ${esc(p.sku)}</span>`:""}</td>
-      <td class="n">${eur(r2(n/Math.max(1,p.qty)))}</td><td class="n">${eur(n)}</td></tr>`;}).join("")
+      <td class="n">${betrag(r2(n/Math.max(1,p.qty)),W)}</td><td class="n">${betrag(n,W)}</td></tr>`;}).join("")
     +(r.versand>0?`<tr><td class="m">1</td><td>Versandkosten</td>
-      <td class="n">${eur(netto(r.versand,r.satz))}</td><td class="n">${eur(netto(r.versand,r.satz))}</td></tr>`:"");
+      <td class="n">${betrag(netto(r.versand,r.satz),W)}</td>
+      <td class="n">${betrag(netto(r.versand,r.satz),W)}</td></tr>`:"");
   const w=String(S.firma||"").split(" ");
   return `<div class="sheet"><div class="hr-top"></div>
     <div class="head">
@@ -1850,10 +1964,15 @@ function bogen(r){
     <table class="pos"><thead><tr><th class="menge">MENGE</th><th class="besch">BESCHREIBUNG</th>
       <th class="stk">Stückpreis</th><th class="betr">BETRAG</th></tr></thead><tbody>${posHTML}</tbody></table>
     <table class="sums">
-      <tr><td class="l">NETTO</td><td class="v">${eur(r.netto)}</td></tr>
+      <tr><td class="l">NETTO</td><td class="v">${betrag(wNet,W)}</td></tr>
       <tr><td class="l">STEUERSATZ</td><td class="v">${nf.format(r.satz)} %</td></tr>
-      <tr><td class="l">UMSATZSTEUER</td><td class="v">${eur(r.ust)}</td></tr>
-      <tr class="end"><td class="l">END BETRAG</td><td class="v">${eur(r.brutto)}</td></tr></table>
+      <tr><td class="l">UMSATZSTEUER</td><td class="v">${betrag(wUst,W)}</td></tr>
+      <tr class="end"><td class="l">END BETRAG</td><td class="v">${betrag(wBru,W)}</td></tr></table>
+    ${W!=="EUR"?`<div style="margin-top:4mm;font-size:8.6pt;border-left:2.5pt solid #12266B;padding-left:3mm">
+        <b>Umrechnung in Euro</b> — Kurs 1 ${esc(W)} = ${nf.format(K)} EUR<br>
+        Nettobetrag ${eur(r.netto)} · <b>Umsatzsteuer ${eur(r.ust)}</b> · Gesamtbetrag ${eur(r.brutto)}<br>
+        <span style="font-size:7.8pt">Angabe der Umsatzsteuer in Euro gemäß § 14 Abs. 4 UStG.</span>
+      </div>`:""}
     <div class="foot">
       <div class="l1">${esc(S.f1)}</div>
       ${r.garantie?`<div class="l2">Garantie ${esc(r.garantie)} Monate</div>`:""}
@@ -1864,6 +1983,8 @@ function bogen(r){
              <div style="font-size:11pt;font-weight:bold;color:#D4322B">NOCH NICHT BEZAHLT</div>
              <div style="font-size:9pt;margin-top:1.5mm">Zahlbar ohne Abzug bis
                <b>${dDE(r.faellig||r.datum)}</b> auf das unten genannte Konto.</div>
+             ${W!=="EUR"?`<div style="font-size:8.5pt;margin-top:1mm">Zahlbetrag
+               <b>${betrag(wBru,W)}</b> (entspricht ${eur(r.brutto)}).</div>`:""}
              <div style="font-size:8.5pt;margin-top:1mm">Bitte geben Sie bei der Überweisung die
                Rechnungsnummer <b>${esc((r.prefix||"")+r.nr)}</b> an.</div>
            </div>
@@ -1889,12 +2010,17 @@ function mitDruckTitel(titel,fn){
 
 function gutschriftBogen(r){
   const S=DB.set;
+  const W=r.waehrung||"EUR", K=r.kurs||1;
+  const gN=Math.abs(r.nettoW!=null?r.nettoW:r.netto),
+        gU=Math.abs(r.ustW!=null?r.ustW:r.ust),
+        gB=Math.abs(r.bruttoW!=null?r.bruttoW:r.brutto);
   const adr=[r.name,r.str,ortZeile(r.plz,r.ort,r.land),landName(r.land)].filter(x=>x&&String(x).trim());
   const abs=v=>Math.abs(v||0);
   const posHTML=r.pos.map(pz=>{
     const nettoZ=netto(pz.brutto,r.satz);
     return `<tr><td class="m">${esc(pz.qty)}</td><td>${esc(pz.title)}</td>
-      <td class="n">${eur(r2(nettoZ/Math.max(1,pz.qty)))}</td><td class="n">${eur(nettoZ)}</td></tr>`;
+      <td class="n">${betrag(r2(nettoZ/Math.max(1,pz.qty)),W)}</td>
+      <td class="n">${betrag(nettoZ,W)}</td></tr>`;
   }).join("");
   const w=String(S.firma||"").split(" ");
   return `<div class="sheet"><div class="hr-top"></div>
@@ -1926,11 +2052,15 @@ function gutschriftBogen(r){
       <th class="stk">STÜCKPREIS</th><th class="betr">BETRAG</th></tr></thead>
       <tbody>${posHTML}</tbody></table>
     <table class="sums">
-      <tr><td class="l">NETTO</td><td class="v">${eur(abs(r.netto))}</td></tr>
+      <tr><td class="l">NETTO</td><td class="v">${betrag(gN,W)}</td></tr>
       <tr><td class="l">STEUERSATZ</td><td class="v">${nf.format(r.satz)} %</td></tr>
-      <tr><td class="l">UMSATZSTEUER</td><td class="v">${eur(abs(r.ust))}</td></tr>
-      <tr class="end"><td class="l">END BETRAG</td><td class="v">${eur(abs(r.brutto))}</td></tr>
+      <tr><td class="l">UMSATZSTEUER</td><td class="v">${betrag(gU,W)}</td></tr>
+      <tr class="end"><td class="l">END BETRAG</td><td class="v">${betrag(gB,W)}</td></tr>
     </table>
+    ${W!=="EUR"?`<div style="margin-top:4mm;font-size:8.6pt;border-left:2.5pt solid #12266B;padding-left:3mm">
+        <b>Umrechnung in Euro</b> — Kurs 1 ${esc(W)} = ${nf.format(K)} EUR<br>
+        Nettobetrag ${eur(Math.abs(r.netto))} · <b>Umsatzsteuer ${eur(Math.abs(r.ust))}</b>
+        · Gesamtbetrag ${eur(Math.abs(r.brutto))}</div>`:""}
     <div class="foot">
       <div class="l1">Dieser Betrag wird Ihnen erstattet. Diese Gutschrift wurde maschinell erstellt
         und ist daher nicht unterschrieben !</div>
@@ -1963,6 +2093,7 @@ function journal(monat){
     <td>${istGut(r)?"G ":""}${esc((r.prefix||"")+r.nr)}</td><td>${dDE(r.datum)}</td><td>${esc(r.name)}</td>
     <td>${esc(r.land)}</td><td>${esc(r.ustid||"")}</td><td>${esc(r.zahlung)}</td>
     <td>${istGut(r)?"—":(r.bezahlt===false?"offen":"bezahlt")}</td>
+    <td>${(r.waehrung&&r.waehrung!=="EUR")?esc(r.waehrung)+" @ "+nf.format(r.kurs||1):"EUR"}</td>
     <td>${istGut(r)?"Gutschrift zu "+esc((r.bezugPrefix||"")+r.bezugNr):esc(r.kurz)}</td>
     <td class="n">${nf.format(r.satz)} %</td><td class="n">${eur(r.netto)}</td>
     <td class="n">${eur(r.ust)}</td><td class="n">${eur(r.brutto)}</td></tr>`).join("");
@@ -1970,8 +2101,8 @@ function journal(monat){
     <h1>${esc(S.firma)} — Rechnungsausgangsbuch</h1>
     <div class="jm">${esc(monLabel(monat))}</div>
     <table><thead><tr><th>Nr.</th><th>Datum</th><th>Kunde</th><th>Land</th><th>USt-IdNr.</th>
-      <th>Zahlung</th><th>Status</th><th>Steuerfall</th><th>Satz</th><th>Netto</th><th>USt.</th><th>Brutto</th></tr></thead>
-      <tbody>${rows}<tr class="tot"><td colspan="9">Summe ${a.anzR} Rechnungen${a.anzG?" und "+a.anzG+" Gutschriften":""}</td>
+      <th>Zahlung</th><th>Status</th><th>Währung</th><th>Steuerfall</th><th>Satz</th><th>Netto</th><th>USt.</th><th>Brutto</th></tr></thead>
+      <tbody>${rows}<tr class="tot"><td colspan="10">Summe ${a.anzR} Rechnungen${a.anzG?" und "+a.anzG+" Gutschriften":""}</td>
       <td class="n">${eur(a.n)}</td><td class="n">${eur(a.u)}</td><td class="n">${eur(a.b)}</td></tr></tbody></table>
     <h5>Aufteilung nach Steuerfall</h5>
     <table><thead><tr><th>Steuerfall</th><th>Anzahl</th><th>Netto</th><th>USt.</th><th>Brutto</th></tr></thead><tbody>
