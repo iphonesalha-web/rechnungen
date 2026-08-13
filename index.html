@@ -125,6 +125,15 @@ table.data tr.tot td{font-weight:700;border-top:2px solid var(--ink);border-bott
 .toast.on{transform:translateX(-50%) translateY(0)}
 @media(prefers-reduced-motion:reduce){*{transition:none!important}}
 
+/* Als-bezahlt-Fenster */
+#bezahltModal{position:fixed;inset:0;background:rgba(16,19,24,.45);z-index:95;
+  display:none;align-items:center;justify-content:center;padding:20px}
+#bezahltModal.on{display:flex}
+#bezahltModal .box{background:#fff;border:1px solid var(--line);border-radius:3px;
+  box-shadow:var(--shadow);padding:26px;width:100%;max-width:460px}
+#bezahltModal h3{font-family:var(--disp);font-size:19px;font-weight:700;letter-spacing:.04em;
+  text-transform:uppercase;margin:0 0 4px}
+
 /* Login */
 #gate{position:fixed;inset:0;background:var(--paper);z-index:90;display:none;align-items:center;justify-content:center;padding:20px}
 #gate.on{display:flex}
@@ -206,6 +215,20 @@ table.data tr.tot td{font-weight:700;border-top:2px solid var(--ink);border-bott
   </div>
   <div class="row" style="margin-top:18px"><button class="btn" id="gGo" style="flex:1;justify-content:center">Anmelden</button></div>
   <p class="hint" id="gMsg" style="text-align:center;margin-top:14px"></p>
+</div></div>
+
+<div id="bezahltModal"><div class="box">
+  <h3>Als bezahlt markieren</h3>
+  <p class="hint" id="bm_sub" style="margin:0 0 18px"></p>
+  <div class="grid g2">
+    <label><span>Zahlungsart</span><select id="bm_art"></select></label>
+    <label><span>Erhaltener Betrag (EUR)</span><input id="bm_betrag" class="num"></label>
+  </div>
+  <p class="hint" id="bm_diff" style="margin-top:14px;font-size:13.5px"></p>
+  <div class="row" style="margin-top:22px;justify-content:flex-end">
+    <button class="btn quiet" id="bm_abbrechen">Abbrechen</button>
+    <button class="btn" id="bm_speichern">Speichern</button>
+  </div>
 </div></div>
 
 <header class="top">
@@ -546,6 +569,13 @@ table.data tr.tot td{font-weight:700;border-top:2px solid var(--ink);border-bott
     <table class="data" id="mOffen"><thead><tr><th style="width:74px">Nr.</th><th style="width:86px">Datum</th>
       <th>Kunde</th><th style="width:96px">Fällig</th><th style="width:90px">Status</th>
       <th class="r" style="width:100px">Betrag</th></tr></thead><tbody></tbody></table></div>
+  <div class="card"><h3>Zahlungsgebühren</h3>
+    <p class="hint" style="margin-top:-8px">Differenz zwischen Rechnungsbetrag und tatsächlich
+      erhaltenem Betrag — z. B. PayPal- oder eBay-Gebühren. Die Rechnung bleibt davon unberührt.
+      <span class="ar">الفرق بين مبلغ الفاتورة والمبلغ المستلم فعليًا — الفاتورة نفسها ما بتتأثر.</span></p>
+    <table class="data" id="mGeb"><thead><tr><th style="width:74px">Nr.</th><th style="width:86px">Datum</th>
+      <th>Kunde</th><th class="r" style="width:96px">Rechnung</th><th class="r" style="width:96px">Erhalten</th>
+      <th class="r" style="width:90px">Gebühr</th></tr></thead><tbody></tbody></table></div>
   <div class="card"><h3>Wareneinkauf im Monat</h3>
     <p class="hint" style="margin-top:-8px">Getrennt vom Umsatz — Einkäufe gehören nicht ins
       Rechnungsausgangsbuch.
@@ -660,6 +690,10 @@ table.data tr.tot td{font-weight:700;border-top:2px solid var(--ink);border-bott
     <table class="data" id="bOffen"><thead><tr><th style="width:74px">Nr.</th><th style="width:86px">Datum</th>
       <th>Kunde</th><th style="width:96px">Fällig</th><th style="width:90px">Status</th>
       <th class="r" style="width:100px">Betrag</th></tr></thead><tbody></tbody></table></div>
+  <div class="card"><h3>Zahlungsgebühren</h3>
+    <table class="data" id="bGeb"><thead><tr><th style="width:74px">Nr.</th><th style="width:86px">Datum</th>
+      <th>Kunde</th><th class="r" style="width:96px">Rechnung</th><th class="r" style="width:96px">Erhalten</th>
+      <th class="r" style="width:90px">Gebühr</th></tr></thead><tbody></tbody></table></div>
   <div class="card"><h3>Wareneinkauf im Monat</h3>
     <table class="data" id="bEink"><thead><tr><th>Herkunft</th><th class="r">Belege</th>
       <th class="r">Summe</th></tr></thead><tbody></tbody></table></div>
@@ -1225,15 +1259,26 @@ $("#n_split").addEventListener("change",splitUI);
 /* ---- Rechnung bearbeiten — nur am Tag der Ausstellung ---- */
 let EDIT_NR=null;
 function tagVon(iso){ return String(iso||"").slice(0,10); }
+const BEARBEITEN_TAGE=7;
+function tageSeit(iso){
+  const a=new Date(tagVon(iso)+"T00:00:00"), b=new Date(heute()+"T00:00:00");
+  return Math.round((b-a)/86400000);
+}
 function darfBearbeiten(r){
   if(istGut(r)) return false;
-  return tagVon(r.erstellt)===heute();
+  const t=tageSeit(r.erstellt);
+  return t>=0 && t<=BEARBEITEN_TAGE;
 }
 function editUI(){
   const an=EDIT_NR!==null;
   $("#editBanner").style.display = an?"":"none";
   $("#nSave").textContent = an ? "Änderung speichern" : "Rechnung erstellen";
-  if(an) $("#editText").textContent="Rechnung "+(DB.set.prefix||"")+EDIT_NR+" wird bearbeitet — die Nummer bleibt gleich.";
+  if(an){
+    const rr=DB.rechnungen.find(x=>x.nr===EDIT_NR&&!istGut(x));
+    const t=rr?tageSeit(rr.erstellt):0;
+    $("#editText").textContent="Rechnung "+(DB.set.prefix||"")+EDIT_NR+" wird bearbeitet — die Nummer bleibt gleich."
+      + (t>0 ? " (ausgestellt vor "+t+" Tag"+(t>1?"en":"")+")" : "");
+  }
   if($("#splitWrap")) $("#splitWrap").style.display = an ? "none" : $("#splitWrap").style.display;
 }
 $("#editAbbruch").onclick=()=>{ EDIT_NR=null; formLeeren(); editUI(); toast("Bearbeitung abgebrochen"); };
@@ -1250,7 +1295,15 @@ function formLeeren(){
 function bearbeiten(nr){
   const r=DB.rechnungen.find(x=>x.nr===nr&&!istGut(x));
   if(!r) return;
-  if(!darfBearbeiten(r)) return toast("Nur am Ausstellungstag änderbar — bitte stornieren und neu ausstellen");
+  if(!darfBearbeiten(r))
+    return toast("Änderung nach "+BEARBEITEN_TAGE+" Tagen nicht mehr möglich — bitte stornieren und neu ausstellen");
+  const t=tageSeit(r.erstellt);
+  if(t>0 && !confirm(
+      "Diese Rechnung wurde vor "+t+" Tag"+(t>1?"en":"")+" ausgestellt.\n\n"+
+      "Wurde sie bereits an den Kunden geschickt oder ist sie schon bezahlt?\n"+
+      "Falls ja: bitte NICHT ändern, sondern eine Gutschrift erstellen und neu ausstellen.\n\n"+
+      "Trotzdem ändern?"))
+    return;
   EDIT_NR=nr;
   $("#n_name").value=r.name||""; $("#n_ref").value=r.ref||"";
   $("#n_str").value=r.str||"";   $("#n_plz").value=r.plz||"";
@@ -1457,12 +1510,21 @@ function gutSumme(){
 
 /* ---- Gutschrift bearbeiten — nur am Tag der Ausstellung ---- */
 let EDIT_GUT_NR=null;
-function darfBearbeitenGut(r){ return istGut(r) && tagVon(r.erstellt)===heute(); }
+function darfBearbeitenGut(r){
+  if(!istGut(r)) return false;
+  const t=tageSeit(r.erstellt);
+  return t>=0 && t<=BEARBEITEN_TAGE;
+}
 function editGutUI(){
   const an=EDIT_GUT_NR!==null;
   $("#editGutBanner").style.display = an?"":"none";
   $("#gSave").textContent = an ? "Änderung speichern" : "Gutschrift erstellen";
-  if(an) $("#editGutText").textContent="Gutschrift "+EDIT_GUT_NR+" wird bearbeitet — die Nummer bleibt gleich.";
+  if(an){
+    const rr=DB.rechnungen.find(x=>x.nr===EDIT_GUT_NR&&istGut(x));
+    const t=rr?tageSeit(rr.erstellt):0;
+    $("#editGutText").textContent="Gutschrift "+EDIT_GUT_NR+" wird bearbeitet — die Nummer bleibt gleich."
+      + (t>0 ? " (ausgestellt vor "+t+" Tag"+(t>1?"en":"")+")" : "");
+  }
 }
 $("#editGutAbbruch").onclick=()=>{ EDIT_GUT_NR=null; gFormLeeren(); editGutUI(); toast("Bearbeitung abgebrochen"); };
 
@@ -1479,7 +1541,14 @@ function gFormLeeren(){
 function bearbeitenGutschrift(nr){
   const r=DB.rechnungen.find(x=>x.nr===nr&&istGut(x));
   if(!r) return;
-  if(!darfBearbeitenGut(r)) return toast("Nur am Ausstellungstag änderbar");
+  if(!darfBearbeitenGut(r))
+    return toast("Änderung nach "+BEARBEITEN_TAGE+" Tagen nicht mehr möglich");
+  const t=tageSeit(r.erstellt);
+  if(t>0 && !confirm(
+      "Diese Gutschrift wurde vor "+t+" Tag"+(t>1?"en":"")+" ausgestellt.\n\n"+
+      "Wurde sie bereits an den Kunden geschickt?\nFalls ja: bitte NICHT ändern.\n\n"+
+      "Trotzdem ändern?"))
+    return;
   EDIT_GUT_NR=nr;
 
   const quelle = !r.extern ? nurRechnungen().find(x=>x.nr===r.bezugNr) : null;
@@ -1951,18 +2020,59 @@ function renderListe(){
 $("#printSel").onclick=()=>{
   const n=$$("#tab input:checked").map(c=>({nr:+c.dataset.nr, typ:c.dataset.typ||"rechnung"}));
   n.length?druck(n):toast("Nichts ausgewählt");};
-async function alsBezahlt(nr){
+/* ---- Als bezahlt markieren: erhaltener Betrag kann von der Rechnung abweichen
+   (z. B. PayPal-/eBay-Gebühr) — Differenz wird als Zahlungsgebühr erfasst,
+   OHNE die Rechnung selbst zu ändern. Rechtlich korrekt statt Betrag zu "korrigieren". ---- */
+let BM_NR=null;
+function alsBezahlt(nr){
   const r=DB.rechnungen.find(x=>x.nr===nr&&!istGut(x));
   if(!r) return;
-  const art=prompt("Wie wurde Rechnung "+((r.prefix||"")+r.nr)+" bezahlt?\n\n"+ZAHLUNG.join(" / "), r.zahlung||ZAHLUNG[0]);
-  if(art===null) return;
-  const gefunden=ZAHLUNG.find(z=>z.toLowerCase()===String(art).trim().toLowerCase());
-  if(!gefunden) return toast("Unbekannte Zahlungsart — bitte genau schreiben");
-  const kopie=Object.assign({},r,{bezahlt:true, zahlung:gefunden, bezahltAm:heute()});
-  try{ await Store.updRechnung(kopie); renderListe();
-       toast("Rechnung "+r.nr+" als bezahlt markiert ("+gefunden+")"); }
-  catch(e){ toast("Fehler: "+(e.message||e)); }
+  BM_NR=nr;
+  $("#bm_sub").textContent="Rechnung "+(r.prefix||"")+r.nr+" — "+eur(r.brutto)+" · "+r.name;
+  $("#bm_art").innerHTML=ZAHLUNG.map(z=>`<option${z===r.zahlung?" selected":""}>${z}</option>`).join("");
+  $("#bm_betrag").value=nf.format(r.erhalten!=null?r.erhalten:r.brutto);
+  bmDiffUpdate();
+  $("#bezahltModal").classList.add("on");
 }
+function bmDiffUpdate(){
+  const r=DB.rechnungen.find(x=>x.nr===BM_NR&&!istGut(x));
+  if(!r) return;
+  const erh=parseNum($("#bm_betrag").value);
+  const diff=r2(r.brutto-erh);
+  const el=$("#bm_diff");
+  if(Math.abs(diff)<0.01){
+    el.textContent="Betrag stimmt mit der Rechnung überein — keine Gebühr."; el.style.color="var(--steel)";
+  }else if(diff>0){
+    el.innerHTML="Differenz <b>"+eur(diff)+"</b> wird als Zahlungsgebühr erfasst "+
+      "(z. B. PayPal- oder eBay-Gebühr). Die Rechnung selbst bleibt unverändert.";
+    el.style.color="var(--orange)";
+  }else{
+    el.innerHTML="Erhaltener Betrag ist <b>"+eur(-diff)+"</b> höher als die Rechnung — bitte prüfen.";
+    el.style.color="var(--rot)";
+  }
+}
+$("#bm_betrag").addEventListener("input",bmDiffUpdate);
+$("#bm_abbrechen").onclick=()=>{ $("#bezahltModal").classList.remove("on"); BM_NR=null; };
+$("#bm_speichern").onclick=async()=>{
+  const r=DB.rechnungen.find(x=>x.nr===BM_NR&&!istGut(x));
+  if(!r) return;
+  const erh=r2(parseNum($("#bm_betrag").value));
+  const diff=r2(r.brutto-erh);
+  const kopie=Object.assign({},r,{
+    bezahlt:true, zahlung:$("#bm_art").value, bezahltAm:heute(),
+    erhalten:erh, gebuehr: diff>0.009 ? diff : 0
+  });
+  $("#bm_speichern").disabled=true;
+  try{
+    await Store.updRechnung(kopie);
+    $("#bezahltModal").classList.remove("on"); BM_NR=null;
+    renderListe();
+    toast(diff>0.009
+      ? "Rechnung "+r.nr+" bezahlt — Gebühr "+eur(diff)+" erfasst"
+      : "Rechnung "+r.nr+" als bezahlt markiert");
+  }catch(e){ toast("Fehler: "+(e.message||e)); }
+  $("#bm_speichern").disabled=false;
+};
 async function storno(nr,typ){
   typ=typ||"rechnung";
   const was = typ==="gutschrift" ? "Gutschrift" : "Rechnung";
@@ -1998,9 +2108,22 @@ function offenePosten(){
   const summe=r2(offen.reduce((a,r)=>a+r.brutto,0));
   return {offen,summe};
 }
+function gebuehrenMonat(monat){
+  const rs=DB.rechnungen.filter(r=>!istGut(r)&&r.monat===monat&&r.gebuehr>0.009);
+  return {rs, summe:r2(rs.reduce((a,r)=>a+r.gebuehr,0))};
+}
 function renderAusw(monat,pref){
   const a=auswertung(monat);
   const ek=einkaufMonat(monat);
+  const geb=gebuehrenMonat(monat);
+  const tg=$("#"+pref+"Geb");
+  if(tg) tg.querySelector("tbody").innerHTML = geb.rs.length
+    ? geb.rs.slice().sort((x,y)=>x.nr-y.nr).map(r=>`<tr>
+        <td class="m">${esc((r.prefix||"")+r.nr)}</td><td class="m">${dDE(r.datum)}</td>
+        <td>${esc(r.name)}</td><td class="r m">${eur(r.brutto)}</td>
+        <td class="r m">${eur(r.erhalten)}</td><td class="r m" style="color:var(--orange)">${eur(r.gebuehr)}</td></tr>`).join("")
+      +`<tr class="tot"><td colspan="5">Summe ${geb.rs.length} Rechnungen</td><td class="r m">${eur(geb.summe)}</td></tr>`
+    : `<tr><td colspan="6" class="empty">Keine Gebühren in diesem Monat</td></tr>`;
   const op=offenePosten();
   const to=$("#"+pref+"Offen");
   if(to) to.querySelector("tbody").innerHTML = op.offen.length
@@ -2044,7 +2167,7 @@ $("#mMonat").onchange=renderMonat;
 $("#mPrint").onclick=()=>journal($("#mMonat").value);
 $("#mAll").onclick=()=>{const a=auswertung($("#mMonat").value);
   a.rs.length?druck(a.rs.map(r=>r.nr)):toast("Keine Rechnungen");};
-$("#mCsv").onclick=()=>{ csv($("#mMonat").value); csvEinkauf($("#mMonat").value); };
+$("#mCsv").onclick=()=>{ csv($("#mMonat").value); csvEinkauf($("#mMonat").value); csvGebuehren($("#mMonat").value); };
 
 function renderBerater(){
   fillMonatSelects();
@@ -2065,7 +2188,7 @@ function renderBerater(){
 }
 $("#bMonat").onchange=renderBerater;
 $("#bPrint").onclick=()=>journal($("#bMonat").value);
-$("#bCsv").onclick=()=>{ csv($("#bMonat").value); csvEinkauf($("#bMonat").value); };
+$("#bCsv").onclick=()=>{ csv($("#bMonat").value); csvEinkauf($("#bMonat").value); csvGebuehren($("#bMonat").value); };
 $("#bAll").onclick=()=>{const a=auswertung($("#bMonat").value);
   a.rs.length?druck(a.rs.map(r=>r.nr)):toast("Keine Rechnungen");};
 
@@ -2080,6 +2203,16 @@ function csv(monat){
      nf.format(r.satz),nf.format(r.netto),nf.format(r.ust),nf.format(r.brutto)].map(q).join(";")));
   lines.push(["","","","","","","SUMME","",nf.format(a.n),nf.format(a.u),nf.format(a.b)].map(q).join(";"));
   dl(new Blob(["\uFEFF"+lines.join("\r\n")],{type:"text/csv"}),"Rechnungsausgang-"+monat+".csv");
+}
+function csvGebuehren(monat){
+  const geb=gebuehrenMonat(monat);
+  if(!geb.rs.length) return;
+  const head=["Rechnungsnummer","Datum","Kunde","Rechnungsbetrag","Erhalten","Gebühr"];
+  const q=v=>'"'+String(v==null?"":v).replace(/"/g,'""')+'"';
+  const lines=[head.join(";")].concat(geb.rs.slice().sort((a,b)=>a.nr-b.nr).map(r=>
+    [(r.prefix||"")+r.nr,dDE(r.datum),r.name,nf.format(r.brutto),nf.format(r.erhalten),nf.format(r.gebuehr)].map(q).join(";")));
+  lines.push(["","","","","SUMME",nf.format(geb.summe)].map(q).join(";"));
+  dl(new Blob(["\uFEFF"+lines.join("\r\n")],{type:"text/csv"}),"Zahlungsgebuehren-"+monat+".csv");
 }
 function csvEinkauf(monat){
   const ek=einkaufMonat(monat);
