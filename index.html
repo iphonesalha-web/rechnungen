@@ -592,6 +592,7 @@ table.data tr.tot td{font-weight:700;border-top:2px solid var(--ink);border-bott
       <button class="btn ghost" id="mPrint">Journal drucken</button>
       <button class="btn quiet" id="mCsv">CSV</button>
       <button class="btn quiet" id="mAll">Alle Rechnungen drucken</button>
+      <button class="btn" id="mSichern" style="background:var(--gruen);border-color:var(--gruen)">Monat sichern (ZIP)</button>
     </div>
   </div>
   <div class="kpi" id="mKpi"></div>
@@ -2348,8 +2349,9 @@ $("#bCsv").onclick=()=>{ csv($("#bMonat").value); csvEinkauf($("#bMonat").value)
 $("#bAll").onclick=()=>{const a=auswertung($("#bMonat").value);
   a.rs.length?druck(a.rs.map(r=>r.nr)):toast("Keine Rechnungen");};
 
-function csv(monat){
+function csvRechnungenText(monat){
   const a=auswertung(monat);
+  if(!a.rs.length) return null;
   const head=["Art","Nummer","Bezug","Datum","Kunde","Land","USt-IdNr","Zahlungsart","Status","Fällig","Währung","Kurs","Betrag Original","Steuerfall","Satz","Netto EUR","USt EUR","Brutto EUR"];
   const q=v=>'"'+String(v==null?"":v).replace(/"/g,'""')+'"';
   const rangC=r=>istGut(r)?1:0;
@@ -2358,28 +2360,40 @@ function csv(monat){
     [(r.prefix||"")+r.nr,dDE(r.datum),r.name,r.land,r.ustid||"",r.zahlung,r.kurz,
      nf.format(r.satz),nf.format(r.netto),nf.format(r.ust),nf.format(r.brutto)].map(q).join(";")));
   lines.push(["","","","","","","SUMME","",nf.format(a.n),nf.format(a.u),nf.format(a.b)].map(q).join(";"));
-  dl(new Blob(["\uFEFF"+lines.join("\r\n")],{type:"text/csv"}),"Rechnungsausgang-"+monat+".csv");
+  return "\uFEFF"+lines.join("\r\n");
 }
-function csvGebuehren(monat){
+function csv(monat){
+  const txt=csvRechnungenText(monat); if(!txt) return;
+  dl(new Blob([txt],{type:"text/csv"}),"Rechnungsausgang-"+monat+".csv");
+}
+function csvGebuehrenText(monat){
   const geb=gebuehrenMonat(monat);
-  if(!geb.rs.length) return;
+  if(!geb.rs.length) return null;
   const head=["Rechnungsnummer","Datum","Kunde","Rechnungsbetrag","Erhalten","Gebühr"];
   const q=v=>'"'+String(v==null?"":v).replace(/"/g,'""')+'"';
   const lines=[head.join(";")].concat(geb.rs.slice().sort((a,b)=>a.nr-b.nr).map(r=>
     [(r.prefix||"")+r.nr,dDE(r.datum),r.name,nf.format(r.brutto),nf.format(r.erhalten),nf.format(r.gebuehr)].map(q).join(";")));
   lines.push(["","","","","SUMME",nf.format(geb.summe)].map(q).join(";"));
-  dl(new Blob(["\uFEFF"+lines.join("\r\n")],{type:"text/csv"}),"Zahlungsgebuehren-"+monat+".csv");
+  return "\uFEFF"+lines.join("\r\n");
 }
-function csvEinkauf(monat){
+function csvGebuehren(monat){
+  const txt=csvGebuehrenText(monat); if(!txt) return;
+  dl(new Blob([txt],{type:"text/csv"}),"Zahlungsgebuehren-"+monat+".csv");
+}
+function csvEinkaufText(monat){
   const ek=einkaufMonat(monat);
-  if(!ek.es.length) return;
+  if(!ek.es.length) return null;
   const head=["Beleg-Nr","Datum","Verkäufer","Land","Herkunft","Zahlung","Satz","Netto","Vorsteuer","Summe"];
   const q=v=>'"'+String(v==null?"":v).replace(/"/g,'""')+'"';
   const lines=[head.join(";")].concat(ek.es.slice().sort((a,b)=>a.nr-b.nr).map(e=>
     [e.nr,dDE(e.datum),e.name,e.land,e.quelle==="privat"?"Privatperson § 25a":"Händler",
      e.zahlung,nf.format(e.satz),nf.format(e.netto),nf.format(e.vorsteuer||0),nf.format(e.summe)].map(q).join(";")));
   lines.push(["","","","","","","","","SUMME",nf.format(ek.summe)].map(q).join(";"));
-  dl(new Blob(["\uFEFF"+lines.join("\r\n")],{type:"text/csv"}),"Wareneinkauf-"+monat+".csv");
+  return "\uFEFF"+lines.join("\r\n");
+}
+function csvEinkauf(monat){
+  const txt=csvEinkaufText(monat); if(!txt) return;
+  dl(new Blob([txt],{type:"text/csv"}),"Wareneinkauf-"+monat+".csv");
 }
 function dl(blob,name){const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=name;
   document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),2000);}
@@ -2642,9 +2656,9 @@ function druck(auswahl){
     : "Rechnungen "+(rs[0].prefix||"")+rs[0].nr+"-"+(rs[rs.length-1].prefix||"")+rs[rs.length-1].nr;
   mitDruckTitel(titel, ()=>setTimeout(()=>window.print(),150));
 }
-function journal(monat){
+function journalSheetHtml(monat){
   const a=auswertung(monat), S=DB.set;
-  if(!a.rs.length) return toast("Kein Umsatz in diesem Monat");
+  if(!a.rs.length) return "";
   // Sortierung: nach Datum, dann Rechnungen vor Gutschriften, dann Nummer
   const rang=r=>istGut(r)?1:0;
   const rows=a.rs.slice().sort((x,y)=>
@@ -2657,7 +2671,7 @@ function journal(monat){
     <td>${istGut(r)?"Gutschrift zu "+esc((r.bezugPrefix||"")+r.bezugNr):esc(r.kurz)}</td>
     <td class="n">${nf.format(r.satz)} %</td><td class="n">${eur(r.netto)}</td>
     <td class="n">${eur(r.ust)}</td><td class="n">${eur(r.brutto)}</td></tr>`).join("");
-  $("#out").innerHTML=`<div class="sheet journal">
+  return `<div class="sheet journal">
     <h1>${esc(S.firma)} — Rechnungsausgangsbuch</h1>
     <div class="jm">${esc(monLabel(monat))}</div>
     <table><thead><tr><th>Nr.</th><th>Datum</th><th>Kunde</th><th>Land</th><th>USt-IdNr.</th>
@@ -2676,8 +2690,12 @@ function journal(monat){
     <p style="font-size:7.5pt;color:#444;margin-top:8mm">
       ${esc(S.firma)} · ${esc(S.str)} · ${esc(S.ort)} · USt-IdNr. ${esc(S.ustid)}
       ${S.stnr?" · Steuernummer "+esc(S.stnr):""}<br>
-      Erstellt am ${dDE(heute())}. Beträge in EUR.</p></div>`
-    + einkaufJournalSeite(monat);
+      Erstellt am ${dDE(heute())}. Beträge in EUR.</p></div>`;
+}
+function journal(monat){
+  const html=journalSheetHtml(monat);
+  if(!html) return toast("Kein Umsatz in diesem Monat");
+  $("#out").innerHTML = html + einkaufJournalSeite(monat);
   mitDruckTitel("Rechnungsausgangsbuch "+monLabel(monat),
                 ()=>setTimeout(()=>window.print(),150));
 }
@@ -2705,7 +2723,7 @@ function buildZipStore(files){
   files.forEach(f=>{
     const nameBytes=enc(f.name), data=f.data, crc=crc32(data), size=data.length;
     const local=new Uint8Array(30+nameBytes.length), lv=new DataView(local.buffer);
-    lv.setUint32(0,0x04034b50,true); lv.setUint16(4,20,true); lv.setUint16(6,0,true);
+    lv.setUint32(0,0x04034b50,true); lv.setUint16(4,20,true); lv.setUint16(6,0x0800,true); // UTF-8-Namen
     lv.setUint16(8,0,true); lv.setUint16(10,time,true); lv.setUint16(12,date,true);
     lv.setUint32(14,crc,true); lv.setUint32(18,size,true); lv.setUint32(22,size,true);
     lv.setUint16(26,nameBytes.length,true); lv.setUint16(28,0,true);
@@ -2715,7 +2733,7 @@ function buildZipStore(files){
 
     const central=new Uint8Array(46+nameBytes.length), cv=new DataView(central.buffer);
     cv.setUint32(0,0x02014b50,true); cv.setUint16(4,20,true); cv.setUint16(6,20,true);
-    cv.setUint16(8,0,true); cv.setUint16(10,0,true); cv.setUint16(12,time,true); cv.setUint16(14,date,true);
+    cv.setUint16(8,0x0800,true); cv.setUint16(10,0,true); cv.setUint16(12,time,true); cv.setUint16(14,date,true);
     cv.setUint32(16,crc,true); cv.setUint32(20,size,true); cv.setUint32(24,size,true);
     cv.setUint16(28,nameBytes.length,true); cv.setUint16(30,0,true); cv.setUint16(32,0,true);
     cv.setUint16(34,0,true); cv.setUint16(36,0,true); cv.setUint32(38,0,true); cv.setUint32(42,localOffset,true);
@@ -2854,6 +2872,126 @@ function odsDownload(nr){
        "Rechnung-"+(r.prefix||"")+r.nr+".ods");
   }catch(e){ toast("Fehler beim Erstellen: "+(e.message||e)); }
 }
+
+
+/* ==================== Monat sichern — alles als ZIP auf den Computer ==================== */
+function dateiSicher(name){
+  return String(name||"Datei").replace(/[\\/:*?"<>|]/g,"-").replace(/\s+/g," ").trim().slice(0,90) || "Datei";
+}
+// Eine unabhängige HTML-Datei — öffnet sich ohne Internet, mit allen Stilen eingebettet.
+function eigenstaendigesHtml(titel, innerHtml){
+  const styleTag = document.querySelector("style") ? document.querySelector("style").outerHTML : "";
+  return `<!DOCTYPE html><html lang="de"><head><meta charset="utf-8">
+<title>${esc(titel)}</title>${styleTag}
+<style>
+  body{background:#f1f4f8;padding:20px 0}
+  .hinweis{max-width:210mm;margin:0 auto 16px;background:#F2F5FD;border-left:3px solid var(--blau);
+    padding:12px 16px;font-family:"IBM Plex Sans",system-ui,sans-serif;font-size:13px;color:#333;border-radius:0 2px 2px 0}
+  @media print{.hinweis{display:none}body{background:#fff;padding:0}}
+</style></head>
+<body>
+  <div class="hinweis">${esc(titel)} — mit Strg+P kannst du diese Datei jederzeit erneut ausdrucken oder als PDF speichern.</div>
+  ${innerHtml}
+</body></html>`;
+}
+function textZuBytes(str){ return new TextEncoder().encode(str); }
+function dataUrlZuBytes(dataUrl){
+  const teile=String(dataUrl).split(",");
+  const bin=atob(teile[1]||"");
+  const bytes=new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++) bytes[i]=bin.charCodeAt(i);
+  return bytes;
+}
+
+async function monatSichern(monat){
+  const a=auswertung(monat);
+  const ek=einkaufMonat(monat);
+  const geb=gebuehrenMonat(monat);
+  const bel=DB.belege.filter(b=>b.monat===monat);
+
+  if(!a.rs.length && !ek.es.length && !bel.length) return toast("Für diesen Monat gibt es nichts zu sichern");
+
+  const S=DB.set;
+  const files=[];
+  const label=monLabel(monat);
+
+  // 1) Übersicht als Textdatei — sofort lesbar, ohne etwas zu öffnen
+  const uebersicht=
+`SALHA AUTOTEILE — Monatssicherung ${label}
+Erstellt am ${dDE(heute())} um ${new Date().toLocaleTimeString("de-DE")}
+
+RECHNUNGEN
+  Anzahl Rechnungen:    ${a.anzR}
+  Anzahl Gutschriften:  ${a.anzG}
+  Netto:                ${eur(a.n)}
+  Umsatzsteuer:         ${eur(a.u)}
+  Brutto:               ${eur(a.b)}
+${geb.rs.length?`
+ZAHLUNGSGEBÜHREN
+  Anzahl: ${geb.rs.length}
+  Summe:  ${eur(geb.summe)}`:""}
+${ek.es.length?`
+WARENEINKAUF
+  Anzahl Belege: ${ek.es.length}
+  Summe:         ${eur(ek.summe)}`:""}
+${bel.length?`
+LIEFERANTENBELEGE (hochgeladene Dateien)
+  Anzahl: ${bel.length}`:""}
+
+Diese ZIP-Datei enthält alle Rechnungen, Gutschriften, Einkaufsbelege und
+hochgeladenen Lieferantenrechnungen dieses Monats — unabhängig vom Online-System.
+Bitte mindestens 10 Jahre aufbewahren (§ 14b UStG).`;
+  files.push({name:"Übersicht "+label+".txt", data:textZuBytes(uebersicht)});
+
+  // 2) Rechnungen + Gutschriften als eine druckbare HTML-Datei
+  if(a.rs.length){
+    const sortiert=a.rs.slice().sort((x,y)=>(x.datum||"").localeCompare(y.datum||"")||x.nr-y.nr);
+    const html=sortiert.map(r=>istGut(r)?gutschriftBogen(r):bogen(r)).join("");
+    files.push({name:"Rechnungen "+label+".html", data:textZuBytes(eigenstaendigesHtml("Rechnungen "+label,html))});
+    const rt=csvRechnungenText(monat);
+    if(rt) files.push({name:"Rechnungsausgang "+label+".csv", data:textZuBytes(rt)});
+  }
+
+  // 3) Rechnungsausgangsbuch (Journal) — die offizielle Zusammenfassung
+  const jHtml=journalSheetHtml(monat);
+  if(jHtml) files.push({name:"Rechnungsausgangsbuch "+label+".html", data:textZuBytes(eigenstaendigesHtml("Rechnungsausgangsbuch "+label,jHtml))});
+
+  // 4) Zahlungsgebühren
+  const gt=csvGebuehrenText(monat);
+  if(gt) files.push({name:"Zahlungsgebuehren "+label+".csv", data:textZuBytes(gt)});
+
+  // 5) Wareneinkauf (§ 25a-Belege) + Journal
+  if(ek.es.length){
+    const html=ek.es.slice().sort((x,y)=>x.nr-y.nr).map(einkaufBogen).join("");
+    files.push({name:"Einkaufsbelege "+label+".html", data:textZuBytes(eigenstaendigesHtml("Einkaufsbelege "+label,html))});
+    const et=csvEinkaufText(monat);
+    if(et) files.push({name:"Wareneinkauf "+label+".csv", data:textZuBytes(et)});
+    const ejHtml=einkaufJournalSeite(monat);
+    if(ejHtml) files.push({name:"Wareneinkaufsbuch "+label+".html", data:textZuBytes(eigenstaendigesHtml("Wareneinkaufsbuch "+label,ejHtml))});
+  }
+
+  // 6) Hochgeladene Lieferantenbelege — Originaldateien
+  if(bel.length){
+    const genutzt={};
+    bel.forEach(b=>{
+      const ext=(b.dateiName&&b.dateiName.includes("."))?b.dateiName.slice(b.dateiName.lastIndexOf(".")):
+        (b.dateiTyp==="application/pdf"?".pdf":".jpg");
+      let basis=dateiSicher(b.lieferant+" "+dDE(b.datum))+ext;
+      let name=basis, n=2;
+      while(genutzt[name]){ name=dateiSicher(b.lieferant+" "+dDE(b.datum))+"-"+n+ext; n++; }
+      genutzt[name]=true;
+      files.push({name:"Lieferantenbelege/"+name, data:dataUrlZuBytes(b.datei)});
+    });
+  }
+
+  try{
+    const zipBytes=buildZipStore(files);
+    dl(new Blob([zipBytes],{type:"application/zip"}),
+       "SALHA-Monatssicherung-"+monat+".zip");
+    toast("Monat "+label+" gesichert — "+files.length+" Dateien im ZIP");
+  }catch(e){ toast("Fehler beim Erstellen: "+(e.message||e)); }
+}
+$("#mSichern").onclick=()=>monatSichern($("#mMonat").value);
 
 /* ---------- Start ---------- */
 async function starten(){
