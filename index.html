@@ -296,6 +296,7 @@ table.data tr.tot td{font-weight:700;border-top:2px solid var(--ink);border-bott
         <span class="ar">في eBay اضغط الأيقونة جنب Lieferadresse لنسخ العنوان، ثم الصقه هنا.</span></span></label>
     <div class="grid g2">
       <label><span>Name</span><input id="n_name" placeholder="Michael Bauer"></label>
+      <label><span>Firma (optional)</span><input id="n_firma" placeholder="z. B. Kfz-Angermeier GmbH & Co. KG"></label>
       <label><span>Referenz / Benutzername</span><input id="n_ref" placeholder="PayPal-Transaktion, eBay-Name …"></label>
       <label><span>Straße</span><input id="n_str"></label>
       <label><span>Telefon</span><input id="n_tel"></label>
@@ -408,6 +409,7 @@ table.data tr.tot td{font-weight:700;border-top:2px solid var(--ink);border-bott
       </div>
       <div class="grid g2" style="margin-top:16px">
         <label><span>Name</span><input id="gm_name" placeholder="Thomas Söllner"></label>
+        <label><span>Firma (optional)</span><input id="gm_firma"></label>
         <label><span>Telefon</span><input id="gm_tel"></label>
         <label><span>Straße</span><input id="gm_str"></label>
         <label><span>USt-IdNr. (falls Firma)</span><input id="gm_ustid" class="num"></label>
@@ -463,6 +465,7 @@ table.data tr.tot td{font-weight:700;border-top:2px solid var(--ink);border-bott
       <textarea id="e_paste" rows="3" placeholder="Adresse hier einfügen (Strg + V) — wird automatisch verteilt."></textarea></label>
     <div class="grid g2">
       <label><span>Name</span><input id="e_name" placeholder="Waldemar Janic"></label>
+      <label><span>Firma (optional)</span><input id="e_firma"></label>
       <label><span>Telefon / Kontakt</span><input id="e_tel"></label>
       <label><span>Straße</span><input id="e_str"></label>
       <label><span>PLZ</span><input id="e_plz" class="num"></label>
@@ -1143,14 +1146,29 @@ function parseAdresse(text){
     }
   }
   if(lines.length){ res.name=grossSchreiben(lines.shift()); }
+  // Firmenname erkennen (GmbH, AG, KG, Ltd, SARL usw.) — steht oft als eigene
+  // Zeile zwischen Ansprechpartner und Straße und würde sonst in die Straße rutschen.
+  const FIRMA_MUSTER=/\b(GmbH|AG|KG|OHG|GbR|UG|e\.?\s*K\.?|Inc\.?|Ltd\.?|LLC|PLC|SARL|S\.?A\.?|BV|NV|Co\.)\b/i;
+  const firmaIdx=lines.findIndex(l=>FIRMA_MUSTER.test(l));
+  if(firmaIdx>=0){ res.firma=lines.splice(firmaIdx,1)[0]; }
   if(lines.length){ res.str=lines.join(", "); }
   return res;
+}
+// Adresszeilen fürs Drucken — Firma (falls vorhanden) steht oben, Name als Zusatz darunter.
+function adressZeilen(x, mitLand){
+  if(mitLand===undefined) mitLand=true;
+  const kopf = x.firma ? x.firma : x.name;
+  const zusatz = x.firma ? x.name : null;
+  const rest=[x.str, ortZeile(x.plz,x.ort,x.land)];
+  if(mitLand) rest.push(landName(x.land));
+  return [kopf, zusatz].concat(rest).filter(v=>v&&String(v).trim());
 }
 
 function adresseUebernehmen(text){
   const a=parseAdresse(text);
   if(!a.name&&!a.str&&!a.plz){ toast("Adresse nicht erkannt — bitte Felder von Hand ausfüllen"); return false; }
   if(a.name) $("#n_name").value=a.name;
+  if(a.firma)$("#n_firma").value=a.firma;
   if(a.str)  $("#n_str").value=a.str;
   if(a.plz)  $("#n_plz").value=a.plz;
   if(a.ort)  $("#n_ort").value=a.ort;
@@ -1340,7 +1358,7 @@ function editUI(){
 $("#editAbbruch").onclick=()=>{ EDIT_NR=null; formLeeren(); editUI(); toast("Bearbeitung abgebrochen"); };
 
 function formLeeren(){
-  ["n_name","n_ref","n_str","n_plz","n_ort","n_tel","n_ustid","n_paste","n_hinweis"]
+  ["n_name","n_firma","n_ref","n_str","n_plz","n_ort","n_tel","n_ustid","n_paste","n_hinweis"]
     .forEach(i=>{ if($("#"+i)) $("#"+i).value=""; });
   $("#n_versand").value="0,00"; $("#nPos tbody").innerHTML=""; posRow();
   $$('input[name=tax]').forEach(r=>r.checked=(r.value==="auto"));
@@ -1361,7 +1379,7 @@ function bearbeiten(nr){
       "Trotzdem ändern?"))
     return;
   EDIT_NR=nr;
-  $("#n_name").value=r.name||""; $("#n_ref").value=r.ref||"";
+  $("#n_name").value=r.name||""; $("#n_firma").value=r.firma||""; $("#n_ref").value=r.ref||"";
   $("#n_str").value=r.str||"";   $("#n_plz").value=r.plz||"";
   $("#n_ort").value=r.ort||"";   $("#n_tel").value=r.tel||"";
   $("#n_ustid").value=r.ustid||""; $("#n_land").value=r.land||"DE";
@@ -1460,7 +1478,7 @@ $("#nSave").onclick=async()=>{
         bezahlt: istBezahltUI(),
         faellig: istBezahltUI() ? "" : ($("#n_faellig").value||datum),
         bezahltAm: istBezahltUI() ? datum : "",
-        name,ref:$("#n_ref").value.trim(),str:$("#n_str").value.trim(),plz:$("#n_plz").value.trim(),
+        name,firma:$("#n_firma").value.trim(),ref:$("#n_ref").value.trim(),str:$("#n_str").value.trim(),plz:$("#n_plz").value.trim(),
         ort:$("#n_ort").value.trim(),land:$("#n_land").value,tel:$("#n_tel").value.trim(),ustid,
         pos:g.pos, versand:g.versand, satz:st.satz, art:st.art, kurz:st.kurz, hinweis:st.hinweis,
         netto:r2(gNett*kurs), ust:r2(gMw*kurs), brutto:r2(r2(gNett+gMw)*kurs),
@@ -1469,7 +1487,7 @@ $("#nSave").onclick=async()=>{
       erstellt.push(rec);
     }
     const rec=erstellt[erstellt.length-1];
-    ["n_name","n_ref","n_str","n_plz","n_ort","n_tel","n_ustid","n_paste"].forEach(i=>$("#"+i).value="");
+    ["n_name","n_firma","n_ref","n_str","n_plz","n_ort","n_tel","n_ustid","n_paste"].forEach(i=>$("#"+i).value="");
     $("#n_versand").value="0,00"; $("#nPos tbody").innerHTML=""; posRow();
     $$('input[name=tax]').forEach(r=>r.checked=(r.value==="auto"));
     $("#n_hinweis").value=""; taxUI(); uiSpeichern(); datumPruefen();
@@ -1588,7 +1606,7 @@ function gFormLeeren(){
   $$('input[name=gmodus]').forEach(r=>r.checked=(r.value==="auto"));
   G_QUELLE=null;
   $("#g_grund").value=""; $("#g_rueck").value=""; $("#g_datum").value="";
-  ["gm_nr","gm_name","gm_str","gm_plz","gm_ort","gm_tel","gm_ustid","gm_hinweis","gm_paste"]
+  ["gm_nr","gm_name","gm_firma","gm_str","gm_plz","gm_ort","gm_tel","gm_ustid","gm_hinweis","gm_paste"]
     .forEach(i=>{ if($("#"+i)) $("#"+i).value=""; });
   $("#gPos tbody").innerHTML="";
   gModusUI();
@@ -1636,7 +1654,7 @@ function bearbeitenGutschrift(nr){
     $("#gm_hinweis").value=r.hinweis||"";
     $("#gm_waehrung").value=r.waehrung||"EUR";
     $("#gm_kurs").value=nf.format(r.kurs||1);
-    $("#gm_name").value=r.name||""; $("#gm_tel").value=r.tel||"";
+    $("#gm_name").value=r.name||""; $("#gm_firma").value=r.firma||""; $("#gm_tel").value=r.tel||"";
     $("#gm_str").value=r.str||"";   $("#gm_ustid").value=r.ustid||"";
     $("#gm_plz").value=r.plz||"";   $("#gm_ort").value=r.ort||"";
     $("#gm_land").value=r.land||"DE";
@@ -1715,6 +1733,7 @@ $("#gSave").onclick=async()=>{
       bezugDatum: manuell ? ($("#gm_datum").value||"") : G_QUELLE.datum,
       extern: manuell,
       name: manuell ? $("#gm_name").value.trim() : G_QUELLE.name,
+      firma: manuell ? $("#gm_firma").value.trim() : (G_QUELLE.firma||""),
       ref:  manuell ? "" : G_QUELLE.ref,
       str:  manuell ? $("#gm_str").value.trim() : G_QUELLE.str,
       plz:  manuell ? $("#gm_plz").value.trim() : G_QUELLE.plz,
@@ -1732,7 +1751,7 @@ $("#gSave").onclick=async()=>{
       erstellt:new Date().toISOString()};
     await Store.addRechnung(rec);
     $("#g_grund").value=""; G_QUELLE=null;
-    if(manuell){ ["gm_nr","gm_name","gm_str","gm_plz","gm_ort","gm_tel","gm_ustid","gm_hinweis"]
+    if(manuell){ ["gm_nr","gm_name","gm_firma","gm_str","gm_plz","gm_ort","gm_tel","gm_ustid","gm_hinweis"]
       .forEach(i=>$("#"+i).value=""); $("#gPos tbody").innerHTML=""; gutRow(1,"",0); }
     else gutInit();
     gutSumme(); renderListe(); updateNextGut();
@@ -1803,7 +1822,8 @@ function einkSumme(){
 function einkAdresse(t){
   const a=parseAdresse(t);
   if(!a.name&&!a.str&&!a.plz){ toast("Adresse nicht erkannt — bitte Felder von Hand ausfüllen"); return false; }
-  if(a.name)$("#e_name").value=a.name; if(a.str)$("#e_str").value=a.str;
+  if(a.name)$("#e_name").value=a.name; if(a.firma)$("#e_firma").value=a.firma;
+  if(a.str)$("#e_str").value=a.str;
   if(a.plz)$("#e_plz").value=a.plz;   if(a.ort)$("#e_ort").value=a.ort;
   if(a.tel)$("#e_tel").value=a.tel;   if(a.land)$("#e_land").value=a.land;
   toast("Adresse übernommen"); return true;
@@ -1828,11 +1848,11 @@ $("#eSave").onclick=async()=>{
     const nr=await Store.nextEinkNr();
     const rec={nr, datum, monat:datum.slice(0,7), zahlDatum:$("#e_zahl_datum").value||datum,
       zahlung:$("#e_zahlung").value, quelle:einkQuelle(), notiz:$("#e_notiz").value.trim(),
-      name, tel:$("#e_tel").value.trim(), str:$("#e_str").value.trim(),
+      name, firma:$("#e_firma").value.trim(), tel:$("#e_tel").value.trim(), str:$("#e_str").value.trim(),
       plz:$("#e_plz").value.trim(), ort:$("#e_ort").value.trim(), land:$("#e_land").value,
       pos, versand, satz, netto:n, vorsteuer, summe, erstellt:new Date().toISOString()};
     await Store.addEinkauf(rec);
-    ["e_name","e_tel","e_str","e_plz","e_ort","e_notiz","e_paste"].forEach(i=>$("#"+i).value="");
+    ["e_name","e_firma","e_tel","e_str","e_plz","e_ort","e_notiz","e_paste"].forEach(i=>$("#"+i).value="");
     $("#e_versand").value="0,00"; $("#ePos tbody").innerHTML=""; einkRow(); einkSumme();
     renderEink(); druckEinkauf(nr);
     toast("Einkaufsbeleg "+nr+" erstellt");
@@ -1872,7 +1892,7 @@ async function einkLoeschen(nr){
 
 function einkaufBogen(e){
   const S=DB.set;
-  const adr=[e.name,e.str,ortZeile(e.plz,e.ort,e.land)].filter(x=>x&&String(x).trim());
+  const adr=adressZeilen(e,false);
   const posHTML=e.pos.map(pz=>`<tr><td class="m">${esc(pz.qty)}</td>
       <td>${esc(pz.title)}${pz.sku?`<br><span class="sku">Art.-Nr. ${esc(pz.sku)}</span>`:""}</td>
       <td class="n">${eur(r2(pz.betrag/Math.max(1,pz.qty)))}</td>
@@ -1994,7 +2014,8 @@ $("#gm_paste").addEventListener("input",e=>{
 function gmAdresse(t){
   const a=parseAdresse(t);
   if(!a.name&&!a.str&&!a.plz){ toast("Adresse nicht erkannt"); return false; }
-  if(a.name)$("#gm_name").value=a.name; if(a.str)$("#gm_str").value=a.str;
+  if(a.name)$("#gm_name").value=a.name; if(a.firma)$("#gm_firma").value=a.firma;
+  if(a.str)$("#gm_str").value=a.str;
   if(a.plz)$("#gm_plz").value=a.plz;   if(a.ort)$("#gm_ort").value=a.ort;
   if(a.tel)$("#gm_tel").value=a.tel;   if(a.land)$("#gm_land").value=a.land;
   toast("Adresse übernommen"); return true;
@@ -2146,7 +2167,8 @@ function renderListe(){
     <td class="m" style="color:${istGut(r)?"var(--lila)":"var(--gruen)"};font-weight:600">
       ${esc((r.prefix||"")+r.nr)}${istGut(r)?'<br><span class="tag" style="background:#F3EDF9;color:var(--lila)">Gutschrift</span>':""}</td>
     <td class="m">${dDE(r.datum)}${r.geaendert?`<div class="hint" title="${esc(r.geaendert)}">geändert</div>`:""}</td>
-    <td>${esc(r.name)} <span class="tag">${esc(r.land)}</span>
+    <td>${esc(r.firma||r.name)} <span class="tag">${esc(r.land)}</span>
+      ${r.firma?`<div class="hint">${esc(r.name)}</div>`:""}
       ${istGut(r)?`<div class="hint">zu Rechnung ${esc((r.bezugPrefix||"")+r.bezugNr)}${r.extern?" (extern)":""}</div>`:""}</td>
     <td>${r.bezahlt===false
         ? `<span class="tag" style="background:#FDECEC;color:var(--rot);font-weight:600">OFFEN</span>
@@ -2504,7 +2526,7 @@ function bogen(r){
   const W=r.waehrung||"EUR", K=r.kurs||1;
   const wNet=(r.nettoW!=null?r.nettoW:r.netto), wUst=(r.ustW!=null?r.ustW:r.ust),
         wBru=(r.bruttoW!=null?r.bruttoW:r.brutto);
-  const adr=[r.name,r.str,ortZeile(r.plz,r.ort,r.land),landName(r.land)].filter(x=>x&&String(x).trim());
+  const adr=adressZeilen(r);
   const posHTML=r.pos.map(p=>{const n=netto(p.brutto,r.satz);
     return `<tr><td class="m">${esc(p.qty)}</td>
       <td>${esc(p.title)}${p.sku?`<br><span class="sku">Art.-Nr. ${esc(p.sku)}</span>`:""}</td>
@@ -2588,7 +2610,7 @@ function gutschriftBogen(r){
   const gN=Math.abs(r.nettoW!=null?r.nettoW:r.netto),
         gU=Math.abs(r.ustW!=null?r.ustW:r.ust),
         gB=Math.abs(r.bruttoW!=null?r.bruttoW:r.brutto);
-  const adr=[r.name,r.str,ortZeile(r.plz,r.ort,r.land),landName(r.land)].filter(x=>x&&String(x).trim());
+  const adr=adressZeilen(r);
   const abs=v=>Math.abs(v||0);
   const posHTML=r.pos.map(pz=>{
     const nettoZ=netto(pz.brutto,r.satz);
