@@ -3016,15 +3016,35 @@ Bitte mindestens 10 Jahre aufbewahren (§ 14b UStG).`;
 $("#mSichern").onclick=()=>monatSichern($("#mMonat").value);
 
 /* ---------- Start ---------- */
+function warten(ms){ return new Promise(ok=>setTimeout(ok,ms)); }
+// Auf dem Handy wechselt das Netz oft zwischen WLAN/Mobilfunk — ein einzelner
+// Ladeversuch kann kurz scheitern. Zwei weitere Versuche mit Pause, bevor wir aufgeben.
+async function ladenMitWiederholung(versuche){
+  versuche = versuche||3;
+  let letzterFehler=null;
+  for(let i=1;i<=versuche;i++){
+    try{ return await Store.load(); }
+    catch(e){ letzterFehler=e; if(i<versuche) await warten(900*i); }
+  }
+  throw letzterFehler;
+}
 async function starten(){
-  const d=await Store.load();
+  // Gerüst sofort aufbauen — Navigation und Ansicht erscheinen auch dann,
+  // wenn das Laden der Daten gleich fehlschlägt oder noch dauert.
+  buildNav();
+  let d=null;
+  try{
+    d=await ladenMitWiederholung(3);
+  }catch(e){
+    toast("Daten konnten nicht geladen werden — bitte herunterziehen zum Aktualisieren oder Seite neu laden");
+  }
   if(d&&d.set){ DB.set=Object.assign({},STD.set,d.set); DB.kunden=d.kunden||{};
     DB.rechnungen=Array.isArray(d.rechnungen)?d.rechnungen:[];
     DB.einkauf=Array.isArray(d.einkauf)?d.einkauf:[];
     DB.belege=Array.isArray(d.belege)?d.belege:[]; }
   if(DB.set.logo) LOGO=DB.set.logo;
   $("#brandLogo").src=LOGO; $("#gateLogo").src=LOGO; logoVorschau();
-  buildNav(); fillSet(); renderKunden(); renderListe(); posRow(); taxUI(); uiLaden();
+  fillSet(); renderKunden(); renderListe(); posRow(); taxUI(); uiLaden();
   if(ROLE!=="berater"){ einkInit(); belegInit(); }
   if(ROLE==="berater") renderBerater();
   if(ROLE!=="berater" && !DB.set.ustid){
