@@ -387,6 +387,9 @@ table.data tr.tot td{font-weight:700;border-top:2px solid var(--ink);border-bott
     </div>
 
     <div id="g_autoBox">
+      <label style="margin-bottom:12px"><span>Rechnung suchen</span>
+        <input id="g_suche" placeholder="Nummer, Name oder Firma — z. B. 10093 oder Performance">
+        <span class="hint" id="g_sucheInfo"></span></label>
       <div class="row">
         <select id="g_rech" style="flex:1;min-width:280px"></select>
         <button class="btn quiet" id="g_laden">Positionen übernehmen</button>
@@ -584,10 +587,13 @@ table.data tr.tot td{font-weight:700;border-top:2px solid var(--ink);border-bott
     <select id="fMonat" style="max-width:190px"></select>
     <select id="fZahl" style="max-width:190px"></select>
     <button class="btn ghost" id="printSel">Auswahl drucken</button>
+    <span class="hint" id="auswahlInfo"></span>
   </div>
   <div class="card" style="padding:6px 20px 14px;overflow-x:auto">
     <table class="data" id="tab"><thead><tr>
-      <th style="width:32px"></th><th style="width:74px">Nr.</th><th style="width:86px">Datum</th>
+      <th style="width:32px"><input type="checkbox" id="alleWaehlen" title="Alle markieren"
+        style="width:17px;height:17px;accent-color:var(--blau);cursor:pointer"></th>
+      <th style="width:74px">Nr.</th><th style="width:86px">Datum</th>
       <th>Käufer</th><th style="width:104px">Zahlung</th><th style="width:118px">Steuer</th>
       <th class="r" style="width:96px">Netto</th><th class="r" style="width:96px">Brutto</th>
       <th style="width:200px"></th></tr></thead><tbody></tbody></table>
@@ -1521,15 +1527,27 @@ function gutInit(){
   if(!$("#g_datum").value) $("#g_datum").value=heute();
   if(!$("#g_rueck").value) $("#g_rueck").value=heute();
   if(gModus()==="manuell") return;
-  $("#g_zahl").innerHTML=ZAHLUNG.map(z=>`<option>${z}</option>`).join("");
-  if(!$("#g_datum").value) $("#g_datum").value=heute();
-  if(!$("#g_rueck").value) $("#g_rueck").value=heute();
-  const rs=nurRechnungen();
-  $("#g_rech").innerHTML = rs.length
-    ? rs.map(r=>`<option value="${r.nr}">${esc((r.prefix||"")+r.nr)} · ${dDE(r.datum)} · ${esc(r.name)} · ${eur(r.brutto)}</option>`).join("")
-    : `<option value="">Keine Rechnungen vorhanden</option>`;
-  if(rs.length && !G_QUELLE) gutLaden();
+  gutListeFuellen();
 }
+// Bei vielen Rechnungen ist die Auswahlliste unübersichtlich — das Suchfeld filtert sie.
+function gutListeFuellen(){
+  const q=norm($("#g_suche") ? $("#g_suche").value : "");
+  const alle=nurRechnungen();
+  const rs = q
+    ? alle.filter(r=>[r.nr, r.name, r.firma, r.ref].some(v=>norm(v).includes(q)))
+    : alle;
+  const vorher=+$("#g_rech").value;
+  $("#g_rech").innerHTML = rs.length
+    ? rs.map(r=>`<option value="${r.nr}">${esc((r.prefix||"")+r.nr)} · ${dDE(r.datum)} · ${esc(r.firma||r.name)} · ${eur(r.brutto)}</option>`).join("")
+    : `<option value="">${alle.length?"Nichts gefunden":"Keine Rechnungen vorhanden"}</option>`;
+  if($("#g_sucheInfo"))
+    $("#g_sucheInfo").textContent = q
+      ? rs.length+" von "+alle.length+" Rechnungen" : (alle.length+" Rechnungen");
+  // Auswahl beibehalten, wenn sie noch in der gefilterten Liste steht
+  if(rs.some(r=>r.nr===vorher)) $("#g_rech").value=vorher;
+  if(rs.length && (!G_QUELLE || !rs.some(r=>r.nr===G_QUELLE.nr))) gutLaden();
+}
+if($("#g_suche")) $("#g_suche").addEventListener("input",gutListeFuellen);
 function gutLaden(){
   const nr=+$("#g_rech").value;
   const r=nurRechnungen().find(x=>x.nr===nr);
@@ -1639,7 +1657,9 @@ function bearbeitenGutschrift(nr){
   if(quelle){
     $$('input[name=gmodus]').forEach(x=>x.checked=(x.value==="auto"));
     gModusUI();
-    if(!$("#g_rech").options.length || ![...$("#g_rech").options].some(o=>+o.value===quelle.nr)) gutInit();
+    // Suchfeld leeren, damit die Ursprungsrechnung sicher in der Liste steht
+    if($("#g_suche")) $("#g_suche").value="";
+    gutListeFuellen();
     $("#g_rech").value=quelle.nr;
     G_QUELLE=quelle;
     $("#g_zahlHinweis").textContent="Übernommen von Rechnung "+(quelle.prefix||"")+quelle.nr+
@@ -2201,12 +2221,34 @@ function renderListe(){
   $$("#tab button[data-b]").forEach(b=>b.onclick=()=>alsBezahlt(+b.dataset.b));
   $$("#tab button[data-e]").forEach(b=>b.onclick=()=>bearbeiten(+b.dataset.e));
   $$("#tab button[data-eg]").forEach(b=>b.onclick=()=>bearbeitenGutschrift(+b.dataset.eg));
+  zeilenKaestchen().forEach(c=>c.onchange=auswahlAktualisieren);
+  auswahlAktualisieren();
   $$("#tab button[data-d]").forEach(b=>b.onclick=()=>
     storno(+b.dataset.d, b.dataset.t==="g"?"gutschrift":"rechnung"));
 }
 ["#q","#fMonat","#fZahl"].forEach(s=>$(s).oninput=renderListe);
+// Nur Zeilen-Kästchen zählen — das Kopf-Kästchen (#alleWaehlen) steht im thead und
+// darf nicht als Auswahl mitgezählt werden.
+function zeilenKaestchen(){ return $$("#tab tbody input[type=checkbox]"); }
+function auswahlAktualisieren(){
+  const alle=zeilenKaestchen();
+  const gewaehlt=alle.filter(c=>c.checked);
+  const kopf=$("#alleWaehlen");
+  if(kopf){
+    kopf.checked = alle.length>0 && gewaehlt.length===alle.length;
+    kopf.indeterminate = gewaehlt.length>0 && gewaehlt.length<alle.length;
+  }
+  $("#auswahlInfo").textContent = gewaehlt.length
+    ? gewaehlt.length+" von "+alle.length+" ausgewählt" : "";
+}
+$("#alleWaehlen").onclick=()=>{
+  const an=$("#alleWaehlen").checked;
+  zeilenKaestchen().forEach(c=>c.checked=an);
+  auswahlAktualisieren();
+};
 $("#printSel").onclick=()=>{
-  const n=$$("#tab input:checked").map(c=>({nr:+c.dataset.nr, typ:c.dataset.typ||"rechnung"}));
+  const n=zeilenKaestchen().filter(c=>c.checked)
+    .map(c=>({nr:+c.dataset.nr, typ:c.dataset.typ||"rechnung"}));
   n.length?druck(n):toast("Nichts ausgewählt");};
 /* ---- Als bezahlt markieren: erhaltener Betrag kann von der Rechnung abweichen
    (z. B. PayPal-/eBay-Gebühr) — Differenz wird als Zahlungsgebühr erfasst,
