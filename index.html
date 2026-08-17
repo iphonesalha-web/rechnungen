@@ -238,6 +238,16 @@ table.data tr.tot td{font-weight:700;border-top:2px solid var(--ink);border-bott
     <button class="icon" id="logout" style="display:none">Abmelden</button></div>
 </header>
 
+<div class="note" id="ladeBanner" style="display:none;border-color:var(--rot);background:#FDF2F2;
+     border-radius:0;margin:0;max-width:none">
+  <div style="max-width:1180px;margin:0 auto">
+    <b>Daten konnten nicht geladen werden.</b> Möglicherweise war die Seite im Hintergrund
+    (z. B. beim Wechsel zu einer anderen App), als die Verbindung unterbrochen wurde.
+    <span class="ar">فشل تحميل البيانات — غالبًا لأن الصفحة كانت بالخلفية وقت الانقطاع.</span>
+    <button class="btn" id="ladeErneut" style="margin-left:14px;padding:6px 16px;font-size:14px">Erneut laden</button>
+  </div>
+</div>
+
 <main>
 
 <!-- ===== NEUE RECHNUNG ===== -->
@@ -3017,17 +3027,25 @@ $("#mSichern").onclick=()=>monatSichern($("#mMonat").value);
 
 /* ---------- Start ---------- */
 function warten(ms){ return new Promise(ok=>setTimeout(ok,ms)); }
-// Auf dem Handy wechselt das Netz oft zwischen WLAN/Mobilfunk — ein einzelner
-// Ladeversuch kann kurz scheitern. Zwei weitere Versuche mit Pause, bevor wir aufgeben.
+function mitZeitlimit(fn,ms){
+  return Promise.race([
+    fn(),
+    new Promise((_,rej)=>setTimeout(()=>rej(new Error("Zeitüberschreitung")),ms))
+  ]);
+}
+// Auf dem Handy wechselt das Netz oft zwischen WLAN/Mobilfunk, oder die Seite läuft im
+// Hintergrund (App-Wechsel) — ein einzelner Versuch kann hängen bleiben oder kurz scheitern.
+// Jeder Versuch bekommt ein Zeitlimit, damit wir nicht endlos auf eine tote Anfrage warten.
 async function ladenMitWiederholung(versuche){
   versuche = versuche||3;
   let letzterFehler=null;
   for(let i=1;i<=versuche;i++){
-    try{ return await Store.load(); }
+    try{ return await mitZeitlimit(()=>Store.load(),7000); }
     catch(e){ letzterFehler=e; if(i<versuche) await warten(900*i); }
   }
   throw letzterFehler;
 }
+let LETZTER_LADEFEHLER=false;
 async function starten(){
   // Gerüst sofort aufbauen — Navigation und Ansicht erscheinen auch dann,
   // wenn das Laden der Daten gleich fehlschlägt oder noch dauert.
@@ -3035,8 +3053,11 @@ async function starten(){
   let d=null;
   try{
     d=await ladenMitWiederholung(3);
+    LETZTER_LADEFEHLER=false;
+    $("#ladeBanner").style.display="none";
   }catch(e){
-    toast("Daten konnten nicht geladen werden — bitte herunterziehen zum Aktualisieren oder Seite neu laden");
+    LETZTER_LADEFEHLER=true;
+    $("#ladeBanner").style.display="";
   }
   if(d&&d.set){ DB.set=Object.assign({},STD.set,d.set); DB.kunden=d.kunden||{};
     DB.rechnungen=Array.isArray(d.rechnungen)?d.rechnungen:[];
@@ -3054,6 +3075,16 @@ async function starten(){
     },900);
   }
 }
+$("#ladeErneut").onclick=async()=>{
+  $("#ladeErneut").disabled=true; $("#ladeErneut").textContent="Lädt …";
+  try{ await starten(); toast(LETZTER_LADEFEHLER?"Immer noch keine Verbindung":"Daten geladen"); }
+  finally{ $("#ladeErneut").disabled=false; $("#ladeErneut").textContent="Erneut laden"; }
+};
+document.addEventListener("visibilitychange",()=>{
+  if(document.visibilityState==="visible" && LETZTER_LADEFEHLER && typeof Store!=="undefined"){
+    starten();
+  }
+});
 
 (async function(){
   $("#brandLogo").src=LOGO; $("#gateLogo").src=LOGO;
