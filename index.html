@@ -785,7 +785,12 @@ table.data tr.tot td{font-weight:700;border-top:2px solid var(--ink);border-bott
         <option value="1">Ja — Bestimmungslandsatz</option><option value="0">Nein — deutscher Satz</option></select></label>
       <label><span>Kleinunternehmer § 19</span><select id="s_klein">
         <option value="0">Nein</option><option value="1">Ja — keine USt.</option></select></label>
+      <label><span>§ 19-Hinweis drucken</span><select id="s_kleinhinweis">
+        <option value="0">Nein — Satz nicht drucken</option><option value="1">Ja — Satz drucken</option></select></label>
     </div>
+    <p class="hint">Bei Kleinunternehmern verlangt § 14 Abs. 4 Nr. 8 UStG den Grund der Steuerbefreiung
+      auf der Rechnung. Mit &bdquo;Nein&ldquo; bleibt der Satz weg — bitte mit der Steuerberatung abstimmen.
+      <span class="ar">القانون بيطلب سبب الإعفاء على الفاتورة. مع &laquo;Nein&raquo; بينشال السطر — تأكد من محاسبك.</span></p>
   </div>
   <div class="card"><h3>Fußzeile</h3>
     <div class="grid g2">
@@ -949,6 +954,15 @@ function steuerFall(code,ustid,zahlung){
     hinweis:"Steuerfreie Ausfuhrlieferung (§ 4 Nr. 1a i.V.m. § 6 UStG). Tax-free export delivery. "+
       "Etwaige Einfuhrabgaben und Zölle im Bestimmungsland trägt der Empfänger."};
 }
+/* Der § 19-Hinweis (Kleinunternehmer) wird nur gedruckt, wenn in den Einstellungen
+   "§ 19-Hinweis drucken = Ja" gewählt ist. Alle anderen Steuerhinweise — Reverse Charge,
+   Ausfuhr § 6, OSS § 3c, § 25a — werden immer gedruckt, sie sind zwingend vorgeschrieben. */
+function druckHinweis(h){
+  const t=String(h||"");
+  if(!t) return "";
+  if(/§\s*19\s*UStG/.test(t) && !+DB.set.kleinHinweis) return "";
+  return t;
+}
 const r2=n=>Math.round((+n+Number.EPSILON)*100)/100;
 const istGut=r=>(r&&r.typ)==="gutschrift";
 const docId=r=> (istGut(r)?"G":"") + String(r.nr).padStart(9,"0");
@@ -974,7 +988,7 @@ const esc=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",
 const norm=s=>String(s||"").toLowerCase().trim();
 
 /* ---------- Daten ---------- */
-const STD={set:{next:9959,nextGut:1277,nextEink:1,nextBeleg:1,kasseStart:0,kasseStartDatum:"",prefix:"",satz:19,oss:1,klein:0,
+const STD={set:{next:9959,nextGut:1277,nextEink:1,nextBeleg:1,kasseStart:0,kasseStartDatum:"",prefix:"",satz:19,oss:1,klein:0,kleinHinweis:0,
   firma:"SALHA AUTOTEILE",zusatz:"BMW-Specialist",str:"",ort:"",
   tel:"",fax:"",mob:"",mail:"",
   ustid:"",stnr:"",logo:"",
@@ -2938,12 +2952,12 @@ $("#k_add").onclick=async()=>{
 /* ---------- Einstellungen ---------- */
 const SID={next:"s_next",nextGut:"s_nextgut",nextEink:"s_nexteink",kasseStart:"s_kassestart",kasseStartDatum:"s_kassestartdatum",prefix:"s_prefix",satz:"s_satz",firma:"s_firma",zusatz:"s_zusatz",str:"s_str",
   ort:"s_ort",tel:"s_tel",fax:"s_fax",mob:"s_mob",mail:"s_mail",ustid:"s_ustid",stnr:"s_stnr",
-  oss:"s_oss",klein:"s_klein",f1:"f1",f3:"f3",f4:"f4",f5:"f5"};
+  oss:"s_oss",klein:"s_klein",kleinHinweis:"s_kleinhinweis",f1:"f1",f3:"f3",f4:"f4",f5:"f5"};
 function fillSet(){ Object.entries(SID).forEach(([k,id])=>{const el=$("#"+id);if(el)el.value=DB.set[k];});
   updateNext(); }
 $("#saveSet").onclick=async()=>{
   Object.entries(SID).forEach(([k,id])=>{const el=$("#"+id);if(!el)return;
-    DB.set[k]=["next","nextGut","nextEink","satz","oss","klein","kasseStart"].includes(k)?(parseNum(el.value)||(["next","nextGut","nextEink"].includes(k)?1:0)):el.value;});
+    DB.set[k]=["next","nextGut","nextEink","satz","oss","klein","kleinHinweis","kasseStart"].includes(k)?(parseNum(el.value)||(["next","nextGut","nextEink"].includes(k)?1:0)):el.value;});
   if(DB.set.next<1)DB.set.next=1;
   if(DB.set.nextGut<1)DB.set.nextGut=1;
   if(DB.set.nextEink<1)DB.set.nextEink=1;
@@ -3052,7 +3066,7 @@ function bogen(r){
       <dt>RECHNUNGSNR</dt><dd>${esc((r.prefix||"")+r.nr)}</dd>
       ${r.ref?`<dt>REFERENZ</dt><dd style="font-size:10pt">${esc(r.ref)}</dd>`:""}
     </dl>
-    ${r.hinweis?`<div class="steuerhinweis">${esc(r.hinweis)}</div>`:""}
+    ${druckHinweis(r.hinweis)?`<div class="steuerhinweis">${esc(druckHinweis(r.hinweis))}</div>`:""}
     <table class="pos"><thead><tr><th class="menge">MENGE</th><th class="besch">BESCHREIBUNG</th>
       <th class="stk">Stückpreis</th><th class="betr">BETRAG</th></tr></thead><tbody>${posHTML}</tbody></table>
     <table class="sums">
@@ -3138,7 +3152,7 @@ function gutschriftBogen(r){
     </dl>
     ${r.grund?`<div style="margin-top:6mm;font-size:9.5pt">
        <b>Anmerkungen oder besondere Anweisungen:</b><br>${esc(r.grund)}</div>`:""}
-    ${r.hinweis?`<div class="steuerhinweis">${esc(r.hinweis)}</div>`:""}
+    ${druckHinweis(r.hinweis)?`<div class="steuerhinweis">${esc(druckHinweis(r.hinweis))}</div>`:""}
     <table class="pos"><thead><tr><th class="menge">MENGE</th>
       <th class="besch">BESCHREIBUNG / GRUND DER GUTSCHRIFT</th>
       <th class="stk">STÜCKPREIS</th><th class="betr">BETRAG</th></tr></thead>
@@ -3334,7 +3348,7 @@ function odsContentXml(r){
     {f:`[.E${nettoRow}]+[.E${ustRow}]`,v:r.brutto,style:"ce_num"}])); n++;
 
   push([]);
-  if(r.hinweis) push([{s:r.hinweis}]);
+  if(druckHinweis(r.hinweis)) push([{s:druckHinweis(r.hinweis)}]);
   push([{s:S.f1}]);
   if(r.garantie) push([{s:"Garantie "+r.garantie+" Monate"}]);
   push([{s:S.f3}]);
