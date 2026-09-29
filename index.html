@@ -2046,8 +2046,6 @@ function einkaufBogen(e){
     </dl>
     ${e.notiz?`<div style="margin-top:6mm;font-size:9.5pt">
       <b>Anmerkungen oder besondere Anweisungen:</b><br>${esc(e.notiz)}</div>`:""}
-    ${e.quelle==="privat"?`<div class="steuerhinweis">Ankauf von einer Privatperson ohne
-      Umsatzsteuerausweis. Grundlage für die Differenzbesteuerung nach § 25a UStG beim Weiterverkauf.</div>`:""}
     <table class="pos"><thead><tr><th class="menge">MENGE</th><th class="besch">BESCHREIBUNG</th>
       <th class="stk">STÜCKPREIS</th><th class="betr">BETRAG</th></tr></thead>
       <tbody>${posHTML}</tbody></table>
@@ -2061,8 +2059,6 @@ function einkaufBogen(e){
     <div class="foot">
       <div class="l5" style="color:#12266B">BEZAHLT PER ${esc(String(e.zahlung).toUpperCase())}</div>
       ${String(S.f4||"").split("\n").map(l=>`<div class="l4">${esc(l)}</div>`).join("")}
-      <div class="l1" style="margin-top:8mm">Unterschrift Verkäufer: ______________________________
-        &nbsp;&nbsp;&nbsp;&nbsp; Unterschrift Käufer: ______________________________</div>
     </div></div>`;
 }
 function einkaufJournalSeite(monat){
