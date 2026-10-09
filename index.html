@@ -526,6 +526,14 @@ table.data tr.tot td{font-weight:700;border-top:2px solid var(--ink);border-bott
   </div>
 
   <div class="card" style="padding:6px 20px 14px;overflow-x:auto">
+    <h3 style="margin:16px 0">Wareneinkauf pro Monat</h3>
+    <table class="data" id="eMonTab"><thead><tr>
+      <th>Monat</th><th class="r">Einkaufsbelege</th><th class="r">Lieferantenbelege</th><th class="r">Gesamt</th>
+    </tr></thead><tbody></tbody></table>
+    <p class="hint" style="margin-top:10px">Einkaufsbelege = selbst erstellte Belege (Privatankauf). Lieferantenbelege = unter „Belege“ hochgeladene Rechnungen.
+      <span class="ar">المجموع = فواتير الشراء + الفواتير المرفوعة من تبويب Belege.</span></p>
+  </div>
+  <div class="card" style="padding:6px 20px 14px;overflow-x:auto">
     <h3 style="margin:16px 0">Belege</h3>
     <div class="row" style="margin-bottom:12px">
       <select id="eFilterMonat" style="max-width:200px"></select>
@@ -1999,17 +2007,33 @@ $("#eSave").onclick=async()=>{
   $("#eSave").disabled=false;
 };
 
-function einkMonate(){ return [...new Set(DB.einkauf.map(e=>e.monat))].sort().reverse(); }
+function einkMonate(){
+  return [...new Set([...DB.einkauf.map(e=>e.monat),...DB.belege.map(b=>b.monat)].filter(Boolean))].sort().reverse(); }
 function renderEink(){
   const ms=einkMonate(), sel=$("#eFilterMonat"); const v=sel.value;
   sel.innerHTML=`<option value="">Alle Monate</option>`+ms.map(m=>`<option value="${m}">${monLabel(m)}</option>`).join("");
   if(v) sel.value=v;
   const fm=sel.value;
-  const rows=DB.einkauf.filter(e=>!fm||e.monat===fm);
-  const gesamt=rows.reduce((a,e)=>a+e.summe,0);
+  // Monatsübersicht: eigene Einkaufsbelege + hochgeladene Lieferantenbelege
+  let tA=0,tB=0;
+  const mrows=ms.map(m=>{
+    const a=r2(DB.einkauf.filter(e=>e.monat===m).reduce((s,e)=>s+(e.summe||0),0));
+    const b=r2(DB.belege.filter(x=>x.monat===m).reduce((s,x)=>s+(x.betrag||0),0));
+    tA+=a; tB+=b;
+    return `<tr><td>${monLabel(m)}</td><td class="r m">${eur(a)}</td><td class="r m">${eur(b)}</td>
+      <td class="r m"><b>${eur(r2(a+b))}</b></td></tr>`;}).join("");
+  $("#eMonTab tbody").innerHTML = ms.length
+    ? mrows+`<tr class="tot"><td>Summe</td><td class="r m">${eur(r2(tA))}</td><td class="r m">${eur(r2(tB))}</td><td class="r m">${eur(r2(tA+tB))}</td></tr>`
+    : `<tr><td colspan="4" class="empty">Noch kein Einkauf</td></tr>`;
+  // Liste: beide Arten zusammen, nach Datum absteigend
+  const eig=DB.einkauf.filter(e=>!fm||e.monat===fm).map(e=>({art:"e",datum:e.datum,e}));
+  const lie=DB.belege.filter(b=>!fm||b.monat===fm).map(b=>({art:"b",datum:b.datum,b}));
+  const rows=[...eig,...lie].sort((x,y)=>String(y.datum).localeCompare(String(x.datum)));
+  const gesamt=r2(eig.reduce((a,x)=>a+x.e.summe,0)+lie.reduce((a,x)=>a+(x.b.betrag||0),0));
   $("#eSummeMonat").textContent = rows.length
     ? rows.length+" Belege · Einkauf gesamt "+eur(gesamt) : "";
-  $("#eTab tbody").innerHTML = rows.length ? rows.map(e=>`<tr>
+  $("#eTab tbody").innerHTML = rows.length ? rows.map(x=>{
+    if(x.art==="e"){ const e=x.e; return `<tr>
     <td class="m" style="color:var(--orange);font-weight:600">${esc(e.nr)}</td>
     <td class="m">${dDE(e.datum)}</td>
     <td>${esc(e.name)} <span class="tag">${esc(e.land)}</span></td>
@@ -2017,10 +2041,21 @@ function renderEink(){
     <td><span class="tag">${esc(e.zahlung)}</span></td>
     <td class="r m">${eur(e.summe)}</td>
     <td class="r"><button class="btn quiet" data-ep="${e.nr}" style="padding:4px 10px;font-size:13px">Drucken</button>
-      <button class="icon" data-ed="${e.nr}" title="Löschen">✕</button></td></tr>`).join("")
+      <button class="icon" data-ed="${e.nr}" title="Löschen">✕</button></td></tr>`; }
+    const b=x.b; return `<tr>
+    <td class="m" style="color:var(--steel)">Beleg</td>
+    <td class="m">${dDE(b.datum)}</td>
+    <td>${esc(b.lieferant)}${b.notiz?` <span style="color:var(--steel)">· ${esc(b.notiz)}</span>`:""}</td>
+    <td><span class="tag">Lieferant</span></td>
+    <td><span class="tag">${esc(b.zahlung||"—")}</span></td>
+    <td class="r m">${b.betrag?eur(b.betrag):"—"}</td>
+    <td class="r"><button class="btn quiet" data-edl="${b.id}" style="padding:4px 10px;font-size:13px">Herunterladen</button></td></tr>`;
+  }).join("")
     : `<tr><td colspan="7" class="empty">Keine Einkaufsbelege</td></tr>`;
   $$("#eTab button[data-ep]").forEach(b=>b.onclick=()=>druckEinkauf(+b.dataset.ep));
   $$("#eTab button[data-ed]").forEach(b=>b.onclick=()=>einkLoeschen(+b.dataset.ed));
+  $$("#eTab button[data-edl]").forEach(bt=>bt.onclick=()=>{
+    const b=DB.belege.find(x=>String(x.id)===bt.dataset.edl); if(b) belegDownload(b); });
 }
 $("#eFilterMonat").onchange=renderEink;
 async function einkLoeschen(nr){
@@ -2229,7 +2264,7 @@ function renderBelege(){
 }
 async function belegLoeschen(id){
   if(!confirm("Diesen Beleg löschen?")) return;
-  try{ await Store.delBeleg(id); renderBelege(); toast("Beleg gelöscht"); }
+  try{ await Store.delBeleg(id); renderBelege(); renderEink(); toast("Beleg gelöscht"); }
   catch(e){ toast("Fehler: "+(e.message||e)); }
 }
 function belegInit(){
@@ -2273,7 +2308,7 @@ $("#blSave").onclick=async()=>{
     ["bl_lieferant","bl_betrag","bl_notiz"].forEach(i=>$("#"+i).value="");
     $("#bl_datei").value=""; $("#bl_kamera").value=""; BL_KAMERA=null;
     $("#bl_dateiInfo").textContent=""; $("#bl_dateiInfo").style.color="var(--steel)";
-    renderBelege();
+    renderBelege(); renderEink();
     toast("Beleg gespeichert");
   }catch(e){ toast("Fehler: "+(e.message||e)); }
   $("#blSave").disabled=false;
