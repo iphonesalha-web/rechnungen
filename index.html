@@ -308,6 +308,8 @@ table.data tr.tot td{font-weight:700;border-top:2px solid var(--ink);border-bott
       <label><span>Name</span><input id="n_name" placeholder="Michael Bauer"></label>
       <label><span>Firma (optional)</span><input id="n_firma" placeholder="z. B. Kfz-Angermeier GmbH & Co. KG"></label>
       <label><span>Referenz / Benutzername</span><input id="n_ref" placeholder="PayPal-Transaktion, eBay-Name …"></label>
+      <label><span>Fahrgestellnummer (FIN/VIN) — bei Fahrzeug</span><input id="n_fin" placeholder="z. B. WBAUF31090E123456"></label>
+      <label><span>Baujahr / Erstzulassung — bei Fahrzeug</span><input id="n_bj" placeholder="z. B. 04/2009"></label>
       <label><span>Straße</span><input id="n_str"></label>
       <label><span>Telefon</span><input id="n_tel"></label>
       <label><span>PLZ</span><input id="n_plz" class="num"></label>
@@ -520,6 +522,10 @@ table.data tr.tot td{font-weight:700;border-top:2px solid var(--ink);border-bott
       <label><span>Datum</span><input id="e_datum" type="date"></label>
       <label><span>Zahldatum</span><input id="e_zahl_datum" type="date"></label>
       <label><span>Bezahlt per</span><select id="e_zahlung"></select></label>
+    </div>
+    <div class="grid g2" style="margin-top:14px">
+      <label><span>Fahrgestellnummer (FIN/VIN) — bei Fahrzeug</span><input id="e_fin" placeholder="z. B. WBAUF31090E123456"></label>
+      <label><span>Baujahr / Erstzulassung — bei Fahrzeug</span><input id="e_bj" placeholder="z. B. 04/2009"></label>
     </div>
     <label style="margin-top:14px"><span>Anmerkungen oder besondere Anweisungen</span>
       <input id="e_notiz"></label>
@@ -1491,7 +1497,7 @@ function editUI(){
 $("#editAbbruch").onclick=()=>{ EDIT_NR=null; formLeeren(); editUI(); toast("Bearbeitung abgebrochen"); };
 
 function formLeeren(){
-  ["n_name","n_firma","n_ref","n_str","n_plz","n_ort","n_tel","n_ustid","n_paste","n_hinweis"]
+  ["n_name","n_firma","n_ref","n_fin","n_bj","n_str","n_plz","n_ort","n_tel","n_ustid","n_paste","n_hinweis"]
     .forEach(i=>{ if($("#"+i)) $("#"+i).value=""; });
   $("#n_versand").value="0,00"; $("#nPos tbody").innerHTML=""; posRow();
   $$('input[name=tax]').forEach(r=>r.checked=(r.value==="auto"));
@@ -1513,6 +1519,7 @@ function bearbeiten(nr){
     return;
   EDIT_NR=nr;
   $("#n_name").value=r.name||""; $("#n_firma").value=r.firma||""; $("#n_ref").value=r.ref||"";
+  $("#n_fin").value=r.fin||""; $("#n_bj").value=r.bj||"";
   $("#n_str").value=r.str||"";   $("#n_plz").value=r.plz||"";
   $("#n_ort").value=r.ort||"";   $("#n_tel").value=r.tel||"";
   $("#n_ustid").value=r.ustid||""; $("#n_land").value=r.land||"DE";
@@ -1577,7 +1584,7 @@ $("#nSave").onclick=async()=>{
         garantie:$$('input[name=garantie]').find(r=>r.checked).value,
         bezahlt: istBezahltUI(),
         faellig: istBezahltUI() ? "" : ($("#n_faellig").value||datum),
-        name, ref:$("#n_ref").value.trim(), str:$("#n_str").value.trim(),
+        name, ref:$("#n_ref").value.trim(), fin:$("#n_fin").value.trim(), bj:$("#n_bj").value.trim(), str:$("#n_str").value.trim(),
         plz:$("#n_plz").value.trim(), ort:$("#n_ort").value.trim(),
         land:$("#n_land").value, tel:$("#n_tel").value.trim(), ustid,
         pos, versand, satz:st.satz, art:st.art, kurz:st.kurz, hinweis:st.hinweis,
@@ -1611,7 +1618,7 @@ $("#nSave").onclick=async()=>{
         bezahlt: istBezahltUI(),
         faellig: istBezahltUI() ? "" : ($("#n_faellig").value||datum),
         bezahltAm: istBezahltUI() ? datum : "",
-        name,firma:$("#n_firma").value.trim(),ref:$("#n_ref").value.trim(),str:$("#n_str").value.trim(),plz:$("#n_plz").value.trim(),
+        name,firma:$("#n_firma").value.trim(),ref:$("#n_ref").value.trim(),fin:$("#n_fin").value.trim(),bj:$("#n_bj").value.trim(),str:$("#n_str").value.trim(),plz:$("#n_plz").value.trim(),
         ort:$("#n_ort").value.trim(),land:$("#n_land").value,tel:$("#n_tel").value.trim(),ustid,
         pos:g.pos, versand:g.versand, satz:st.satz, art:st.art, kurz:st.kurz, hinweis:st.hinweis,
         netto:r2(gNett*kurs), ust:r2(gMw*kurs), brutto:r2(r2(gNett+gMw)*kurs),
@@ -1620,7 +1627,7 @@ $("#nSave").onclick=async()=>{
       erstellt.push(rec);
     }
     const rec=erstellt[erstellt.length-1];
-    ["n_name","n_firma","n_ref","n_str","n_plz","n_ort","n_tel","n_ustid","n_paste"].forEach(i=>$("#"+i).value="");
+    ["n_name","n_firma","n_ref","n_fin","n_bj","n_str","n_plz","n_ort","n_tel","n_ustid","n_paste"].forEach(i=>$("#"+i).value="");
     $("#n_versand").value="0,00"; $("#nPos tbody").innerHTML=""; posRow();
     $$('input[name=tax]').forEach(r=>r.checked=(r.value==="auto"));
     $("#n_hinweis").value=""; taxUI(); uiSpeichern(); datumPruefen();
@@ -1918,7 +1925,7 @@ function einkInit(){
     $("#e_land").innerHTML=Object.keys(LAND).sort((a,b)=>LAND[a].localeCompare(LAND[b],"de"))
       .map(c=>`<option value="${c}"${c==="DE"?" selected":""}>${LAND[c]} (${c})</option>`).join("");
   if(!$("#e_zahlung").options.length)
-    $("#e_zahlung").innerHTML=ZAHLUNG.map(z=>`<option${z==="D-Bank"?" selected":""}>${z}</option>`).join("");
+    $("#e_zahlung").innerHTML=[...ZAHLUNG,"MoneyGram"].map(z=>`<option${z==="D-Bank"?" selected":""}>${z}</option>`).join("");
   if(!$("#e_datum").value) $("#e_datum").value=heute();
   if(!$("#e_zahl_datum").value) $("#e_zahl_datum").value=heute();
   if(!$$("#ePos tbody tr").length) einkRow();
@@ -1995,11 +2002,12 @@ $("#eSave").onclick=async()=>{
     const nr=await Store.nextEinkNr();
     const rec={nr, datum, monat:datum.slice(0,7), zahlDatum:$("#e_zahl_datum").value||datum,
       zahlung:$("#e_zahlung").value, quelle:einkQuelle(), notiz:$("#e_notiz").value.trim(),
+      fin:$("#e_fin").value.trim(), bj:$("#e_bj").value.trim(),
       name, firma:$("#e_firma").value.trim(), tel:$("#e_tel").value.trim(), str:$("#e_str").value.trim(),
       plz:$("#e_plz").value.trim(), ort:$("#e_ort").value.trim(), land:$("#e_land").value,
       pos, versand, satz, netto:n, vorsteuer, summe, erstellt:new Date().toISOString()};
     await Store.addEinkauf(rec);
-    ["e_name","e_firma","e_tel","e_str","e_plz","e_ort","e_notiz","e_paste"].forEach(i=>$("#"+i).value="");
+    ["e_name","e_firma","e_tel","e_str","e_plz","e_ort","e_notiz","e_fin","e_bj","e_paste"].forEach(i=>$("#"+i).value="");
     $("#e_versand").value="0,00"; $("#ePos tbody").innerHTML=""; einkRow(); einkSumme();
     renderEink(); druckEinkauf(nr);
     toast("Einkaufsbeleg "+nr+" erstellt");
@@ -2077,7 +2085,7 @@ function einkaufBogen(e){
   const teil=r2(e.summe-e.versand);
   return `<div class="sheet"><div class="hr-top"></div>
     <div class="head">
-      <div><div class="h-rech" style="color:#1B7A46">EINKAUFSBELEG</div><img class="logo" src="${LOGO}" alt=""></div>
+      <div><div class="h-rech" style="color:#1B7A46">EINKAUFSBELEG</div>${e.land&&e.land!=="DE"?`<div style="font-size:9pt;color:#555;margin-top:1mm">Purchase receipt — issued by the buyer</div>`:""}<img class="logo" src="${LOGO}" alt=""></div>
       <div><div class="h-firm">${esc(w[0]||"")} <i>${esc(w.slice(1).join(" "))}</i></div>
         <div class="h-adr"><div class="spec">${esc(S.zusatz)}</div>
           ${esc(S.str)}<br>${esc(S.ort)}<br>Telefon ${esc(S.tel)}<br>
@@ -2092,6 +2100,8 @@ function einkaufBogen(e){
       <dt>BELEG-NR</dt><dd>${esc(e.nr)}</dd>
       <dt>DATUM</dt><dd>${dDE(e.datum)}</dd>
       <dt>ZAHLDATUM</dt><dd>${dDE(e.zahlDatum||e.datum)}</dd>
+      ${e.fin?`<dt>FIN / VIN</dt><dd style="font-size:10pt">${esc(e.fin)}</dd>`:""}
+      ${e.bj?`<dt>BAUJAHR</dt><dd style="font-size:10pt">${esc(e.bj)}</dd>`:""}
     </dl>
     ${e.notiz?`<div style="margin-top:6mm;font-size:9.5pt">
       <b>Anmerkungen oder besondere Anweisungen:</b><br>${esc(e.notiz)}</div>`:""}
@@ -3100,6 +3110,8 @@ function bogen(r){
       <dt>ZAHLDATUM</dt><dd>${dDE(r.datum)}</dd>
       <dt>RECHNUNGSNR</dt><dd>${esc((r.prefix||"")+r.nr)}</dd>
       ${r.ref?`<dt>REFERENZ</dt><dd style="font-size:10pt">${esc(r.ref)}</dd>`:""}
+      ${r.fin?`<dt>FIN / VIN</dt><dd style="font-size:10pt">${esc(r.fin)}</dd>`:""}
+      ${r.bj?`<dt>BAUJAHR</dt><dd style="font-size:10pt">${esc(r.bj)}</dd>`:""}
     </dl>
     ${druckHinweis(r.hinweis)?`<div class="steuerhinweis">${esc(druckHinweis(r.hinweis))}</div>`:""}
     <table class="pos"><thead><tr><th class="menge">MENGE</th><th class="besch">BESCHREIBUNG</th>
@@ -3384,6 +3396,8 @@ function odsContentXml(r){
 
   push([]);
   if(druckHinweis(r.hinweis)) push([{s:druckHinweis(r.hinweis)}]);
+  if(r.fin) push([{s:"FIN / VIN: "+r.fin}]);
+  if(r.bj) push([{s:"Baujahr: "+r.bj}]);
   push([{s:S.f1}]);
   if(r.garantie) push([{s:"Garantie "+r.garantie+" Monate"}]);
   push([{s:S.f3}]);
