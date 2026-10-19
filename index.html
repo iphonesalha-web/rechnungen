@@ -2288,6 +2288,44 @@ function belegMonatOptionen(sel){
   const ms=belegMonate();
   sel.innerHTML=`<option value="">Alle Monate</option>`+ms.map(m=>`<option value="${m}">${monLabel(m)}</option>`).join("");
 }
+// Fotografierten Beleg (JPEG-Data-URL) als einseitiges A4-PDF verpacken — ohne Bibliothek.
+// Das JPEG wird unverändert eingebettet (DCTDecode), das PDF ist daher kaum größer als das Foto.
+function jpegZuPdf(dataUrl){
+  const bin=atob(String(dataUrl).split(",")[1]);
+  const jpg=new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++) jpg[i]=bin.charCodeAt(i);
+  // Bildgröße aus dem SOF-Marker lesen
+  let w=0,h=0,i=2;
+  while(i+9<jpg.length){
+    if(jpg[i]!==0xFF){ i++; continue; }
+    const m=jpg[i+1], len=(jpg[i+2]<<8)|jpg[i+3];
+    if(m>=0xC0&&m<=0xCF&&m!==0xC4&&m!==0xC8&&m!==0xCC){ h=(jpg[i+5]<<8)|jpg[i+6]; w=(jpg[i+7]<<8)|jpg[i+8]; break; }
+    i+=2+len;
+  }
+  if(!w||!h) throw new Error("Foto konnte nicht in PDF umgewandelt werden");
+  // A4 (595×842 pt), Bild mit 18 pt Rand eingepasst und zentriert
+  const PW=595.28, PH=841.89, R=18;
+  const f=Math.min((PW-2*R)/w,(PH-2*R)/h);
+  const iw=w*f, ih=h*f, ix=(PW-iw)/2, iy=(PH-ih)/2;
+  const inhalt=`q ${iw.toFixed(2)} 0 0 ${ih.toFixed(2)} ${ix.toFixed(2)} ${iy.toFixed(2)} cm /Im0 Do Q`;
+  const enc=new TextEncoder(), teile=[]; let pos=0; const offs=[];
+  const add=x=>{ const b=typeof x==="string"?enc.encode(x):x; teile.push(b); pos+=b.length; };
+  add("%PDF-1.4\n%\xE2\xE3\xCF\xD3\n");
+  const obj=(n,body)=>{ offs[n]=pos; add(n+" 0 obj\n"); if(Array.isArray(body)) body.forEach(add); else add(body); add("\nendobj\n"); };
+  obj(1,"<< /Type /Catalog /Pages 2 0 R >>");
+  obj(2,"<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
+  obj(3,`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PW} ${PH}] /Resources << /XObject << /Im0 4 0 R >> >> /Contents 5 0 R >>`);
+  obj(4,[`<< /Type /XObject /Subtype /Image /Width ${w} /Height ${h} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpg.length} >>\nstream\n`,jpg,"\nendstream"]);
+  obj(5,`<< /Length ${inhalt.length} >>\nstream\n${inhalt}\nendstream`);
+  const xref=pos;
+  let x="xref\n0 6\n0000000000 65535 f \n";
+  for(let n=1;n<=5;n++) x+=String(offs[n]).padStart(10,"0")+" 00000 n \n";
+  add(x+"trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n"+xref+"\n%%EOF\n");
+  const out=new Uint8Array(pos); let o=0; teile.forEach(b=>{ out.set(b,o); o+=b.length; });
+  let s=""; for(let k=0;k<out.length;k+=0x8000) s+=String.fromCharCode.apply(null,out.subarray(k,k+0x8000));
+  return "data:application/pdf;base64,"+btoa(s);
+}
+
 function belegDownload(b){
   // Data-URL -> Blob: zuverlässiger als ein direkter data:-Link, gleiche Technik wie dl()
   const teile=b.datei.split(","), mime=(teile[0].match(/data:(.*?);base64/)||[])[1]||b.dateiTyp||"application/octet-stream";
@@ -2350,9 +2388,10 @@ $("#blSave").onclick=async()=>{
   if(f && f.size>BELEG_MAX) return toast("Datei zu groß — bitte verkleinern (max. "+Math.round(BELEG_MAX/1024)+" KB)");
   $("#blSave").disabled=true;
   try{
-    const datei = BL_KAMERA ? BL_KAMERA : await belegLesen(f);
-    const dateiName = BL_KAMERA ? (BL_NAME||("Foto-"+heute()+".jpg")) : f.name;
-    const dateiTyp  = BL_KAMERA ? "image/jpeg" : f.type;
+    // Fotos werden als PDF gespeichert (die KI hat vorher das Foto selbst gelesen)
+    const datei = BL_KAMERA ? jpegZuPdf(BL_KAMERA) : await belegLesen(f);
+    const dateiName = BL_KAMERA ? (BL_NAME||("Foto-"+heute()+".jpg")).replace(/\.jpe?g$/i,"")+".pdf" : f.name;
+    const dateiTyp  = BL_KAMERA ? "application/pdf" : f.type;
     const datum=$("#bl_datum").value||heute();
     const rec={id:Date.now(), datum, monat:datum.slice(0,7), lieferant,
       betrag:r2(parseNum($("#bl_betrag").value))||0, notiz:$("#bl_notiz").value.trim(),
