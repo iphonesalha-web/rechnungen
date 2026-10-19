@@ -480,7 +480,9 @@ table.data tr.tot td{font-weight:700;border-top:2px solid var(--ink);border-bott
     <label style="margin-bottom:16px"><span>Adresse einfügen</span>
       <textarea id="e_paste" rows="3" placeholder="Adresse hier einfügen (Strg + V) — wird automatisch verteilt."></textarea></label>
     <div class="grid g2">
-      <label><span>Name</span><input id="e_name" placeholder="Waldemar Janic"></label>
+      <label><span>Name</span><input id="e_name" placeholder="Waldemar Janic" list="e_namen" autocomplete="off">
+        <datalist id="e_namen"></datalist>
+        <span class="hint" id="e_nameInfo"></span></label>
       <label><span>Firma (optional)</span><input id="e_firma"></label>
       <label><span>Telefon / Kontakt</span><input id="e_tel"></label>
       <label><span>Straße</span><input id="e_str"></label>
@@ -2017,6 +2019,58 @@ $("#e_paste").addEventListener("input",e=>{
   if(t.split(/\n/).filter(x=>x.trim()).length>=2){ if(einkAdresse(t)) e.target.value=""; }
 });
 
+// ---- Bekannte Verkäufer: Name tippen → Adresse vom letzten Einkauf übernehmen ----
+const E_FELDER=["e_firma","e_tel","e_str","e_plz","e_ort","e_land"];
+const E_KEYS={e_firma:"firma",e_tel:"tel",e_str:"str",e_plz:"plz",e_ort:"ort",e_land:"land"};
+const nameKey=n=>String(n||"").trim().toLowerCase().replace(/\s+/g," ");
+function einkVerkaeufer(){
+  // neuester Beleg je Name gewinnt (höchste Nummer)
+  const m=new Map();
+  [...DB.einkauf].sort((a,b)=>(b.nr||0)-(a.nr||0)).forEach(e=>{
+    const k=nameKey(e.name); if(k&&!m.has(k)) m.set(k,e); });
+  return m;
+}
+function einkNamenListe(){
+  $("#e_namen").innerHTML=[...einkVerkaeufer().values()].map(e=>{
+    const ort=[e.str,[e.plz,e.ort].filter(Boolean).join(" ")].filter(Boolean).join(", ");
+    return `<option value="${esc(e.name)}"${ort?` label="${esc(ort)}"`:""}></option>`; }).join("");
+}
+let E_AUTO=null; // zuletzt automatisch gesetzte Werte
+function einkAutoLoeschen(){
+  if(!E_AUTO) return;
+  // nur Felder leeren, die seitdem nicht von Hand geändert wurden
+  E_FELDER.forEach(id=>{ const el=$("#"+id);
+    if(el.value===E_AUTO[id]){ if(id==="e_land") el.value="DE"; else el.value=""; }
+    el.classList.remove("ki-auto"); });
+  // Herkunft/Satz zurücksetzen, falls sie automatisch gesetzt und nicht geändert wurden
+  if(einkQuelle()===E_AUTO.quelle && $("#e_satz").value===E_AUTO.satz){
+    const q=$$('input[name=equelle]').find(x=>x.value===E_AUTO.vorQuelle); if(q) q.checked=true;
+    $("#e_satz").value=E_AUTO.vorSatz; einkQuelleUI();
+  }
+  E_AUTO=null; $("#e_nameInfo").textContent="";
+}
+function einkNameGeaendert(){
+  const e=einkVerkaeufer().get(nameKey($("#e_name").value));
+  if(!e){ einkAutoLoeschen(); return; }
+  if(E_AUTO&&E_AUTO.nr===e.nr) return;
+  einkAutoLoeschen();
+  E_AUTO={nr:e.nr, vorQuelle:einkQuelle(), vorSatz:$("#e_satz").value};
+  E_FELDER.forEach(id=>{ const el=$("#"+id), v=e[E_KEYS[id]]||(id==="e_land"?"DE":"");
+    el.value=v; E_AUTO[id]=el.value;
+    if(v&&id!=="e_land") el.classList.add("ki-auto"); });
+  // Herkunft (privat/Händler) und Vorsteuersatz ebenfalls übernehmen
+  const q=$$('input[name=equelle]').find(x=>x.value===(e.quelle||"privat")); if(q) q.checked=true;
+  if(e.quelle==="haendler"&&e.satz) $("#e_satz").value=String(e.satz).replace(".",",");
+  einkQuelleUI();
+  E_AUTO.quelle=einkQuelle(); E_AUTO.satz=$("#e_satz").value;
+  $("#e_nameInfo").innerHTML="↺ Daten vom letzten Einkauf (Nr. "+esc(String(e.nr))+", "+esc(dDE(e.datum))+") übernommen — bitte prüfen. "+
+    "<span class='ar'>تم ملء البيانات من آخر شراء — راجعها.</span>";
+  $("#e_nameInfo").style.color="var(--gruen)";
+}
+$("#e_name").addEventListener("input",einkNameGeaendert);
+$("#e_name").addEventListener("change",einkNameGeaendert);
+E_FELDER.forEach(id=>$("#"+id).addEventListener("input",()=>$("#"+id).classList.remove("ki-auto")));
+
 $("#eSave").onclick=async()=>{
   const name=$("#e_name").value.trim(); if(!name) return toast("Name des Verkäufers fehlt");
   const {pos,versand,satz,summe,netto:n,vorsteuer}=einkSumme();
@@ -2032,7 +2086,8 @@ $("#eSave").onclick=async()=>{
       plz:$("#e_plz").value.trim(), ort:$("#e_ort").value.trim(), land:$("#e_land").value,
       pos, versand, satz, netto:n, vorsteuer, summe, erstellt:new Date().toISOString()};
     await Store.addEinkauf(rec);
-    ["e_name","e_firma","e_tel","e_str","e_plz","e_ort","e_notiz","e_fin","e_bj","e_paste"].forEach(i=>$("#"+i).value="");
+    ["e_name","e_firma","e_tel","e_str","e_plz","e_ort","e_notiz","e_fin","e_bj","e_paste"].forEach(i=>{ $("#"+i).value=""; $("#"+i).classList.remove("ki-auto"); });
+    E_AUTO=null; $("#e_nameInfo").textContent=""; $("#e_land").value="DE";
     $("#e_versand").value="0,00"; $("#ePos tbody").innerHTML=""; einkRow(); einkSumme();
     renderEink(); druckEinkauf(nr);
     toast("Einkaufsbeleg "+nr+" erstellt");
@@ -2043,6 +2098,7 @@ $("#eSave").onclick=async()=>{
 function einkMonate(){
   return [...new Set([...DB.einkauf.map(e=>e.monat),...DB.belege.map(b=>b.monat)].filter(Boolean))].sort().reverse(); }
 function renderEink(){
+  einkNamenListe();
   const ms=einkMonate(), sel=$("#eFilterMonat"); const v=sel.value;
   sel.innerHTML=`<option value="">Alle Monate</option>`+ms.map(m=>`<option value="${m}">${monLabel(m)}</option>`).join("");
   if(v) sel.value=v;
