@@ -777,22 +777,22 @@ table.data tr.tot td{font-weight:700;border-top:2px solid var(--ink);border-bott
   </div>
   <div class="card"><h3>KI-Belegerkennung</h3>
     <p class="hint" style="margin-top:0">Lieferantenrechnungen unter „Belege“ werden automatisch ausgelesen
-      (Lieferant, Datum, Netto/MwSt/Brutto). Kosten ca. 1 Cent pro Beleg.
-      Der Schlüssel wird <b>nur auf diesem Gerät</b> gespeichert — nicht in der Datenbank.
-      <span class="ar">المفتاح بينحفظ على هالجهاز بس. التكلفة تقريبًا سنت لكل فاتورة.</span></p>
+      (Lieferant, Datum, Netto/MwSt/Brutto). Der Schlüssel wird <b>nur auf diesem Gerät</b> gespeichert — nicht in der Datenbank.
+      <span class="ar">المفتاح بينحفظ على هالجهاز بس.</span></p>
     <div class="grid g2">
-      <label><span>Claude API-Schlüssel</span><input id="s_kikey" type="password" autocomplete="off" placeholder="sk-ant-…"></label>
-      <label><span>Modell</span><select id="s_kimodel">
-        <option value="claude-sonnet-5-5">Sonnet 5.5 — genau (empfohlen)</option>
-        <option value="claude-haiku-5-5">Haiku 5.5 — günstiger</option></select></label>
+      <label><span>Anbieter</span><select id="s_kianbieter">
+        <option value="gemini">Google Gemini — kostenlos</option>
+        <option value="claude">Claude (Anthropic) — ca. 1 Cent/Beleg</option></select></label>
+      <label><span>Modell</span><select id="s_kimodel"></select></label>
+      <label style="grid-column:1/-1"><span id="s_kikeylabel">API-Schlüssel</span>
+        <input id="s_kikey" type="password" autocomplete="off"></label>
     </div>
     <div class="row" style="margin-top:12px">
       <button class="btn" id="s_kisave">Schlüssel speichern</button>
       <button class="btn quiet" id="s_kitest">Verbindung testen</button>
       <span class="hint" id="s_kiinfo"></span>
     </div>
-    <p class="hint">Schlüssel erstellen: console.anthropic.com → API Keys. Dort ein monatliches Ausgabenlimit setzen.
-      <span class="ar">أنشئ المفتاح من console.anthropic.com وحط حد شهري للمصاريف.</span></p>
+    <p class="hint" id="s_kihilfe"></p>
   </div>
   <div class="card"><h3>Firma</h3>
     <div class="grid g2">
@@ -2807,9 +2807,21 @@ function belegScanZuschneiden(c){
    Liest Lieferant, Datum, Rechnungsnr., Netto/MwSt/Brutto und Positionen aus
    einem Foto oder PDF. Der API-Schlüssel bleibt NUR auf diesem Gerät
    (localStorage) — er wird nie in Firebase oder GitHub gespeichert. */
-const KI_KEY="salha_ki_key", KI_MODEL="salha_ki_model";
-function kiKey(){ try{ return localStorage.getItem(KI_KEY)||""; }catch(e){ return ""; } }
-function kiModel(){ try{ return localStorage.getItem(KI_MODEL)||"claude-sonnet-5-5"; }catch(e){ return "claude-sonnet-5-5"; } }
+// Anbieter: "gemini" (kostenlos, Google AI Studio) oder "claude" (Anthropic, bezahlt)
+const KI_ANBIETER="salha_ki_anbieter";
+const KI_CFG={
+  claude:{key:"salha_ki_key", model:"salha_ki_model", placeholder:"sk-ant-…",
+    modelle:[["claude-sonnet-5-5","Sonnet 5.5 — genau (empfohlen)"],["claude-haiku-5-5","Haiku 5.5 — günstiger"]],
+    hilfe:"Schlüssel: console.anthropic.com → API Keys. Dort ein monatliches Ausgabenlimit setzen. <span class='ar'>المفتاح من console.anthropic.com — حط حد شهري للمصاريف.</span>"},
+  gemini:{key:"salha_gem_key", model:"salha_gem_model", placeholder:"AIza…",
+    modelle:[["gemini-3.8-flash","Gemini 3.8 Flash — genau (empfohlen)"],["gemini-3.5-flash-lite","Gemini 3.5 Flash-Lite — schneller"]],
+    hilfe:"Kostenloser Schlüssel: aistudio.google.com → „Get API key“ (mit Google-Konto anmelden). Hinweis: Im kostenlosen Tarif darf Google die Inhalte zur Verbesserung seiner Produkte nutzen. <span class='ar'>المفتاح المجاني من aistudio.google.com ← Get API key. ملاحظة: بالخطة المجانية Google ممكن تستعمل المحتوى لتحسين منتجاتها.</span>"}
+};
+const lsGet=(k,d)=>{ try{ return localStorage.getItem(k)||d; }catch(e){ return d; } };
+const lsSet=(k,v)=>{ try{ if(v) localStorage.setItem(k,v); else localStorage.removeItem(k); }catch(e){ toast("Speichern fehlgeschlagen"); } };
+function kiAnbieter(){ const a=lsGet(KI_ANBIETER,""); return KI_CFG[a]?a:"gemini"; }
+function kiKey(){ return lsGet(KI_CFG[kiAnbieter()].key,""); }
+function kiModel(){ const c=KI_CFG[kiAnbieter()]; const m=lsGet(c.model,""); return c.modelle.some(x=>x[0]===m)?m:c.modelle[0][0]; }
 
 const KI_SCHEMA={type:"object",additionalProperties:false,
   required:["lieferant","rechnungsnummer","datum","netto","mwst","brutto","waehrung","positionen","hinweis"],
@@ -2828,7 +2840,7 @@ const KI_SCHEMA={type:"object",additionalProperties:false,
     hinweis:{type:"string",description:"Kurzer Hinweis bei Unsicherheit (unleserlich, Summen passen nicht), sonst leer"}
   }};
 
-async function belegKI(dataUrl){
+async function belegKIClaude(dataUrl){
   const key=kiKey();
   if(!key) throw new Error("Kein KI-Schlüssel — unter Einstellungen eintragen");
   const m=String(dataUrl).match(/^data:(.*?);base64,(.*)$/);
@@ -2864,6 +2876,60 @@ async function belegKI(dataUrl){
   const t=(j.content||[]).find(c=>c.type==="text");
   if(!t) throw new Error("Leere KI-Antwort");
   return JSON.parse(t.text);
+}
+
+const KI_PROMPT="Das ist eine Eingangsrechnung eines Lieferanten an SALHA AUTOTEILE (Autoteile-Händler, Alsdorf). "+
+  "Lies die Daten genau aus. Beträge als Zahl in Euro (Punkt als Dezimaltrennzeichen). "+
+  "Lieferant = der Aussteller/Verkäufer, nicht SALHA. Erfinde nichts: unbekannte Texte leer, unbekannte Beträge 0. "+
+  "Prüfe, ob Netto + MwSt = Brutto ergibt; wenn nicht, schreibe das in 'hinweis'.";
+
+async function belegKIGemini(dataUrl){
+  const key=kiKey();
+  if(!key) throw new Error("Kein KI-Schlüssel — unter Einstellungen eintragen");
+  const m=String(dataUrl).match(/^data:(.*?);base64,(.*)$/);
+  if(!m) throw new Error("Datei nicht lesbar");
+  const mime=m[1]==="application/pdf"||/^image\/(jpeg|png|webp)$/.test(m[1])?m[1]:"image/jpeg";
+  const felder="Antworte NUR mit einem JSON-Objekt mit genau diesen Feldern: "+
+    "lieferant (Text), rechnungsnummer (Text), datum (Text YYYY-MM-DD oder leer), netto (Zahl), mwst (Zahl), "+
+    "brutto (Zahl, Endbetrag), waehrung (Text), positionen (Liste von Objekten mit beschreibung, teilenummer, "+
+    "menge, einzelpreis, gesamt), hinweis (Text, sonst leer).";
+  const ctl=new AbortController(); const tm=setTimeout(()=>ctl.abort(),90000);
+  let res;
+  try{
+    res=await fetch("https://generativelanguage.googleapis.com/v1beta/models/"+encodeURIComponent(kiModel())+":generateContent",
+      {method:"POST",signal:ctl.signal,headers:{"content-type":"application/json","x-goog-api-key":key},
+       body:JSON.stringify({
+         contents:[{role:"user",parts:[{inline_data:{mime_type:mime,data:m[2]}},{text:KI_PROMPT+" "+felder}]}],
+         generationConfig:{responseMimeType:"application/json",temperature:0}})});
+  }catch(e){
+    throw new Error(e.name==="AbortError"?"Zeitüberschreitung — bitte nochmal versuchen":"Keine Verbindung zur KI");
+  }finally{ clearTimeout(tm); }
+  const j=await res.json().catch(()=>({}));
+  if(!res.ok){
+    const msg=(j.error&&j.error.message)||("HTTP "+res.status);
+    if(res.status===400&&/api key/i.test(msg)||res.status===401||res.status===403) throw new Error("KI-Schlüssel ungültig");
+    if(res.status===429) throw new Error("Kostenloses Tageslimit erreicht — später nochmal versuchen");
+    throw new Error("KI-Fehler: "+msg);
+  }
+  const c=(j.candidates||[])[0];
+  const txt=c&&c.content&&(c.content.parts||[]).map(p=>p.text||"").join("");
+  if(!txt) throw new Error("KI konnte diesen Beleg nicht lesen");
+  return JSON.parse(txt.replace(/^\s*```(?:json)?/i,"").replace(/```\s*$/,""));
+}
+
+// Antwort in feste Form bringen (falsche Typen/fehlende Felder abfangen)
+function kiNormal(r){
+  r=r&&typeof r==="object"?r:{};
+  const num=v=>{ if(typeof v==="string") v=parseNum(v); v=Number(v); return isFinite(v)?Math.round(v*100)/100:0; };
+  const str=v=>v==null?"":String(v).trim();
+  return {lieferant:str(r.lieferant), rechnungsnummer:str(r.rechnungsnummer), datum:str(r.datum),
+    netto:num(r.netto), mwst:num(r.mwst), brutto:num(r.brutto), waehrung:str(r.waehrung), hinweis:str(r.hinweis),
+    positionen:(Array.isArray(r.positionen)?r.positionen:[]).map(p=>({beschreibung:str(p&&p.beschreibung),
+      teilenummer:str(p&&p.teilenummer), menge:num(p&&p.menge), einzelpreis:num(p&&p.einzelpreis), gesamt:num(p&&p.gesamt)}))};
+}
+
+async function belegKI(dataUrl){
+  return kiNormal(kiAnbieter()==="gemini" ? await belegKIGemini(dataUrl) : await belegKIClaude(dataUrl));
 }
 
 const zahlDE=n=>(Math.round(n*100)/100).toFixed(2).replace(".",",");
@@ -2914,25 +2980,40 @@ async function blAuslesen(dataUrl){
 $("#blKi").onclick=()=>{ if(BL_KI_QUELLE) blAuslesen(BL_KI_QUELLE); };
 
 // Einstellungen: KI-Schlüssel (nur lokal auf diesem Gerät)
-$("#s_kikey").value=kiKey();
-$("#s_kimodel").value=kiModel();
+function kiEinstellungenZeigen(){
+  const an=kiAnbieter(), c=KI_CFG[an];
+  $("#s_kianbieter").value=an;
+  $("#s_kimodel").innerHTML=c.modelle.map(([v,t])=>`<option value="${v}">${t}</option>`).join("");
+  $("#s_kimodel").value=kiModel();
+  $("#s_kikey").value=kiKey(); $("#s_kikey").placeholder=c.placeholder;
+  $("#s_kikeylabel").textContent=(an==="gemini"?"Gemini":"Claude")+" API-Schlüssel";
+  $("#s_kihilfe").innerHTML=c.hilfe;
+  $("#s_kiinfo").textContent="";
+}
+kiEinstellungenZeigen();
+$("#s_kianbieter").onchange=()=>{ lsSet(KI_ANBIETER,$("#s_kianbieter").value); kiEinstellungenZeigen(); };
+$("#s_kimodel").onchange=()=>lsSet(KI_CFG[kiAnbieter()].model,$("#s_kimodel").value);
 $("#s_kisave").onclick=()=>{
-  try{
-    const k=$("#s_kikey").value.trim();
-    if(k) localStorage.setItem(KI_KEY,k); else localStorage.removeItem(KI_KEY);
-    localStorage.setItem(KI_MODEL,$("#s_kimodel").value);
-    $("#s_kiinfo").textContent=k?"Gespeichert ✓":"Schlüssel entfernt"; $("#s_kiinfo").style.color="var(--gruen)";
-  }catch(e){ toast("Speichern fehlgeschlagen"); }
+  const c=KI_CFG[kiAnbieter()], k=$("#s_kikey").value.trim();
+  lsSet(KI_ANBIETER,kiAnbieter()); lsSet(c.key,k); lsSet(c.model,$("#s_kimodel").value);
+  $("#s_kiinfo").textContent=k?"Gespeichert ✓":"Schlüssel entfernt"; $("#s_kiinfo").style.color="var(--gruen)";
 };
-$("#s_kimodel").onchange=()=>{ try{ localStorage.setItem(KI_MODEL,$("#s_kimodel").value); }catch(e){} };
 $("#s_kitest").onclick=async()=>{
   $("#s_kisave").click();
   const info=$("#s_kiinfo"); info.textContent="Teste …"; info.style.color="var(--steel)";
+  if(!kiKey()){ info.textContent="❌ Kein Schlüssel eingetragen"; info.style.color="var(--rot)"; return; }
   try{
-    const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",
-      headers:{"content-type":"application/json","x-api-key":kiKey(),"anthropic-version":"2023-06-01",
-        "anthropic-dangerous-direct-browser-access":"true"},
-      body:JSON.stringify({model:kiModel(),max_tokens:16,messages:[{role:"user",content:"Antworte nur mit OK"}]})});
+    let r;
+    if(kiAnbieter()==="gemini"){
+      r=await fetch("https://generativelanguage.googleapis.com/v1beta/models/"+encodeURIComponent(kiModel())+":generateContent",
+        {method:"POST",headers:{"content-type":"application/json","x-goog-api-key":kiKey()},
+         body:JSON.stringify({contents:[{role:"user",parts:[{text:"Antworte nur mit OK"}]}]})});
+    }else{
+      r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",
+        headers:{"content-type":"application/json","x-api-key":kiKey(),"anthropic-version":"2023-06-01",
+          "anthropic-dangerous-direct-browser-access":"true"},
+        body:JSON.stringify({model:kiModel(),max_tokens:16,messages:[{role:"user",content:"Antworte nur mit OK"}]})});
+    }
     const j=await r.json().catch(()=>({}));
     if(r.ok){ info.textContent="✅ Verbindung funktioniert"; info.style.color="var(--gruen)"; }
     else { info.textContent="❌ "+((j.error&&j.error.message)||("HTTP "+r.status)); info.style.color="var(--rot)"; }
