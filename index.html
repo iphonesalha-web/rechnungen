@@ -202,6 +202,7 @@ table.data tr.tot td{font-weight:700;border-top:2px solid var(--ink);border-bott
   .sheet{box-shadow:none;margin:0;page-break-after:always;width:auto;min-height:auto}
   .sheet:last-child{page-break-after:auto}
 }
+.ki-auto{background:#fff6cf!important;box-shadow:inset 0 0 0 1px #e0b400}
 </style>
 </head>
 <body>
@@ -567,21 +568,26 @@ table.data tr.tot td{font-weight:700;border-top:2px solid var(--ink);border-bott
       <label><span>Rechnungsdatum</span><input id="bl_datum" type="date"></label>
       <label><span>Betrag brutto (optional)</span><input id="bl_betrag" class="num" placeholder="0,00"></label>
       <label><span>Referenz / Notiz</span><input id="bl_notiz" placeholder="z. B. Rechnungsnummer des Lieferanten"></label>
+      <label><span>Netto (optional)</span><input id="bl_netto" class="num" placeholder="0,00"></label>
+      <label><span>davon MwSt (optional)</span><input id="bl_mwst" class="num" placeholder="0,00"></label>
     </div>
     <div class="grid g2" style="margin-top:14px">
       <label><span>Datei — PDF oder Bild</span>
         <input type="file" id="bl_datei" accept="application/pdf,image/*"></label>
       <label><span>Oder direkt fotografieren</span>
         <input type="file" id="bl_kamera" accept="image/*" capture="environment">
-        <span class="hint">Am Handy öffnet sich die Kamera. Das Foto wird automatisch verkleinert.
-          <span class="ar">عالموبايل بتفتح الكاميرا، والصورة بتنضغط تلقائيًا.</span></span></label>
+        <span class="hint">Am Handy öffnet sich die Kamera. Das Blatt wird automatisch ausgeschnitten,
+          gerade gerichtet und ausgelesen.
+          <span class="ar">عالموبايل بتفتح الكاميرا، والورقة بتنقص وتتعدل وتنقرا تلقائيًا.</span></span></label>
     </div>
     <p class="hint" id="bl_dateiInfo" style="margin-top:6px"></p>
+    <p class="hint" id="bl_kiInfo" style="margin-top:4px"></p>
     <div class="note" style="margin-top:14px">Die Datei wird direkt in der Datenbank gespeichert —
       keine zusätzliche Anmeldung nötig. Maximale Dateigröße ca. 700 KB (ein normales PDF per E-Mail
       passt fast immer). Bei größeren Dateien: Foto verkleinern oder als PDF neu exportieren.
       <span class="ar">حد الحجم حوالي 700 كيلوبايت — أغلب فواتير الإيميل العادية أصغر من هيك.</span></div>
-    <div class="row" style="margin-top:16px"><button class="btn" id="blSave">Beleg speichern</button></div>
+    <div class="row" style="margin-top:16px"><button class="btn" id="blSave">Beleg speichern</button>
+      <button class="btn quiet" id="blKi" disabled>🤖 Erneut auslesen</button></div>
   </div>
 
   <div class="card" style="padding:6px 20px 14px;overflow-x:auto">
@@ -768,6 +774,25 @@ table.data tr.tot td{font-weight:700;border-top:2px solid var(--ink);border-bott
     </div>
     <div class="note">Muss lückenlos an deine letzte Rechnung anschließen.
       <span class="ar">لازم يكمل بدون فجوات من آخر فاتورة.</span></div>
+  </div>
+  <div class="card"><h3>KI-Belegerkennung</h3>
+    <p class="hint" style="margin-top:0">Lieferantenrechnungen unter „Belege“ werden automatisch ausgelesen
+      (Lieferant, Datum, Netto/MwSt/Brutto). Kosten ca. 1 Cent pro Beleg.
+      Der Schlüssel wird <b>nur auf diesem Gerät</b> gespeichert — nicht in der Datenbank.
+      <span class="ar">المفتاح بينحفظ على هالجهاز بس. التكلفة تقريبًا سنت لكل فاتورة.</span></p>
+    <div class="grid g2">
+      <label><span>Claude API-Schlüssel</span><input id="s_kikey" type="password" autocomplete="off" placeholder="sk-ant-…"></label>
+      <label><span>Modell</span><select id="s_kimodel">
+        <option value="claude-sonnet-5-5">Sonnet 5.5 — genau (empfohlen)</option>
+        <option value="claude-haiku-5-5">Haiku 5.5 — günstiger</option></select></label>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <button class="btn" id="s_kisave">Schlüssel speichern</button>
+      <button class="btn quiet" id="s_kitest">Verbindung testen</button>
+      <span class="hint" id="s_kiinfo"></span>
+    </div>
+    <p class="hint">Schlüssel erstellen: console.anthropic.com → API Keys. Dort ein monatliches Ausgabenlimit setzen.
+      <span class="ar">أنشئ المفتاح من console.anthropic.com وحط حد شهري للمصاريف.</span></p>
   </div>
   <div class="card"><h3>Firma</h3>
     <div class="grid g2">
@@ -2232,12 +2257,29 @@ function belegLesen(datei){
     rd.readAsDataURL(datei);
   });
 }
-$("#bl_datei").addEventListener("change",()=>{
+$("#bl_datei").addEventListener("change",async()=>{
   const f=$("#bl_datei").files[0];
+  BL_KAMERA=null; BL_NAME="";
+  if(f && /^image\//.test(f.type)){
+    // Bild aus der Galerie: genauso behandeln wie ein Kamerafoto (zuschneiden + verkleinern)
+    try{
+      BL_KAMERA=await belegFotoVerkleinern(f); BL_NAME=f.name.replace(/\.[^.]+$/,"")+".jpg";
+      $("#bl_datei").value="";
+      $("#bl_dateiInfo").textContent=f.name+" — zugeschnitten ("+Math.round(BL_KAMERA.length/1024)+" KB)";
+      $("#bl_dateiInfo").style.color="var(--gruen)";
+      blAuslesen(BL_KAMERA);
+    }catch(x){
+      $("#bl_dateiInfo").textContent="Fehler: "+(x.message||x); $("#bl_dateiInfo").style.color="var(--rot)";
+      blAuslesen(null);
+    }
+    return;
+  }
   $("#bl_dateiInfo").textContent = f
     ? f.name+" — "+Math.round(f.size/1024)+" KB"+(f.size>BELEG_MAX?" — ZU GROSS":"")
     : "";
   $("#bl_dateiInfo").style.color = (f&&f.size>BELEG_MAX) ? "var(--rot)" : "var(--steel)";
+  if(f && f.size<=BELEG_MAX){ try{ blAuslesen(await belegLesen(f)); }catch(x){ blAuslesen(null); } }
+  else blAuslesen(null);
 });
 if(!$("#bl_datum").value) $("#bl_datum").value=heute();
 
@@ -2284,17 +2326,18 @@ function belegInit(){
 $("#blFilterMonat").onchange=renderBelege;
 
 // Kamera-Aufnahme wird verkleinert und wie eine normale Datei behandelt
-let BL_KAMERA=null;
+let BL_KAMERA=null, BL_NAME="";
 $("#bl_kamera").addEventListener("change",async e=>{
   const f=e.target.files[0];
   if(!f){ BL_KAMERA=null; return; }
   try{
-    BL_KAMERA=await belegFotoVerkleinern(f);
+    BL_KAMERA=await belegFotoVerkleinern(f); BL_NAME="";
     $("#bl_datei").value="";
-    $("#bl_dateiInfo").textContent="Foto aufgenommen ("+Math.round(BL_KAMERA.length/1024)+" KB)";
+    $("#bl_dateiInfo").textContent="Foto aufgenommen und zugeschnitten ("+Math.round(BL_KAMERA.length/1024)+" KB)";
     $("#bl_dateiInfo").style.color="var(--gruen)";
+    blAuslesen(BL_KAMERA);
   }catch(x){
-    BL_KAMERA=null;
+    BL_KAMERA=null; blAuslesen(null);
     $("#bl_dateiInfo").textContent="Fehler: "+(x.message||x);
     $("#bl_dateiInfo").style.color="var(--rot)";
   }
@@ -2308,15 +2351,19 @@ $("#blSave").onclick=async()=>{
   $("#blSave").disabled=true;
   try{
     const datei = BL_KAMERA ? BL_KAMERA : await belegLesen(f);
-    const dateiName = BL_KAMERA ? ("Foto-"+heute()+".jpg") : f.name;
+    const dateiName = BL_KAMERA ? (BL_NAME||("Foto-"+heute()+".jpg")) : f.name;
     const dateiTyp  = BL_KAMERA ? "image/jpeg" : f.type;
     const datum=$("#bl_datum").value||heute();
     const rec={id:Date.now(), datum, monat:datum.slice(0,7), lieferant,
       betrag:r2(parseNum($("#bl_betrag").value))||0, notiz:$("#bl_notiz").value.trim(),
+      netto:r2(parseNum($("#bl_netto").value))||0, mwst:r2(parseNum($("#bl_mwst").value))||0,
       dateiName, dateiTyp, datei, erstellt:new Date().toISOString()};
+    if(BL_KI) rec.ki={positionen:BL_KI.positionen||[], rechnungsnummer:BL_KI.rechnungsnummer||"",
+      gelesen:{netto:BL_KI.netto,mwst:BL_KI.mwst,brutto:BL_KI.brutto}, modell:kiModel()};
     await Store.addBeleg(rec);
-    ["bl_lieferant","bl_betrag","bl_notiz"].forEach(i=>$("#"+i).value="");
-    $("#bl_datei").value=""; $("#bl_kamera").value=""; BL_KAMERA=null;
+    ["bl_lieferant","bl_betrag","bl_notiz","bl_netto","bl_mwst"].forEach(i=>{ $("#"+i).value=""; $("#"+i).classList.remove("ki-auto"); });
+    $("#bl_datei").value=""; $("#bl_kamera").value=""; BL_KAMERA=null; BL_NAME="";
+    BL_KI=null; BL_KI_QUELLE=null; $("#blKi").disabled=true; blKiStatus("");
     $("#bl_dateiInfo").textContent=""; $("#bl_dateiInfo").style.color="var(--steel)";
     renderBelege(); renderEink();
     toast("Beleg gespeichert");
@@ -2356,6 +2403,542 @@ function renderBelegeBerater(){
 }
 
 
+/* ==================== Dokument-Scan: Blatt finden, entzerren, gerade richten ====================
+   (gleicher Code wie in der App „صالحة سكان“) */
+function detectDocumentCorners(src) {
+    const MAXD = 360;
+    const s = Math.min(1, MAXD / Math.max(src.width, src.height));
+    const W = Math.max(8, Math.round(src.width * s));
+    const H = Math.max(8, Math.round(src.height * s));
+    const sc = document.createElement('canvas');
+    sc.width = W; sc.height = H;
+    const sctx = sc.getContext('2d', { willReadFrequently: true });
+    sctx.drawImage(src, 0, 0, W, H);
+    const px = sctx.getImageData(0, 0, W, H).data;
+    const N = W * H;
+
+    // 1) "Paper score": bright and colourless pixels score high
+    let score = new Float32Array(N);
+    for (let i = 0, j = 0; i < N; i++, j += 4) {
+        const r = px[j], g = px[j + 1], b = px[j + 2];
+        const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+        const v = 0.299 * r + 0.587 * g + 0.114 * b - 0.6 * (mx - mn);
+        score[i] = v < 0 ? 0 : v;
+    }
+    // 2) Box blur twice to remove printed text and noise
+    const blur = (a) => {
+        const t = new Float32Array(N), o = new Float32Array(N), R = 2;
+        for (let y = 0; y < H; y++) {
+            let acc = 0, cnt = 0;
+            for (let x = -R; x < W + R; x++) {
+                if (x + R < W) { acc += a[y * W + x + R]; cnt++; }
+                if (x - R - 1 >= 0) { acc -= a[y * W + x - R - 1]; cnt--; }
+                if (x >= 0 && x < W) t[y * W + x] = acc / cnt;
+            }
+        }
+        for (let x = 0; x < W; x++) {
+            let acc = 0, cnt = 0;
+            for (let y = -R; y < H + R; y++) {
+                if (y + R < H) { acc += t[(y + R) * W + x]; cnt++; }
+                if (y - R - 1 >= 0) { acc -= t[(y - R - 1) * W + x]; cnt--; }
+                if (y >= 0 && y < H) o[y * W + x] = acc / cnt;
+            }
+        }
+        return o;
+    };
+    score = blur(blur(score));
+
+    // 3) Otsu threshold → paper mask
+    const hist = new Uint32Array(256);
+    for (let i = 0; i < N; i++) hist[Math.min(255, score[i] | 0)]++;
+    let sum = 0; for (let i = 0; i < 256; i++) sum += i * hist[i];
+    let sumB = 0, wB = 0, best = -1, thr = 128;
+    for (let t = 0; t < 256; t++) {
+        wB += hist[t]; if (!wB) continue;
+        const wF = N - wB; if (!wF) break;
+        sumB += t * hist[t];
+        const mB = sumB / wB, mF = (sum - sumB) / wF;
+        const between = wB * wF * (mB - mF) * (mB - mF);
+        if (between > best) { best = between; thr = t; }
+    }
+    let mask = new Uint8Array(N);
+    for (let i = 0; i < N; i++) mask[i] = score[i] > thr ? 1 : 0;
+
+    // 4) Morphological opening (cuts thin bridges to bright background objects)
+    const morph = (m, erode) => {
+        const o = new Uint8Array(N), R = 2;
+        for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+            let v = erode ? 1 : 0;
+            for (let dy = -R; dy <= R && (erode ? v : !v); dy++) {
+                const yy = y + dy; if (yy < 0 || yy >= H) continue;
+                for (let dx = -R; dx <= R; dx++) {
+                    const xx = x + dx; if (xx < 0 || xx >= W) continue;
+                    const mv = m[yy * W + xx];
+                    if (erode && !mv) { v = 0; break; }
+                    if (!erode && mv) { v = 1; break; }
+                }
+            }
+            o[y * W + x] = v;
+        }
+        return o;
+    };
+    mask = morph(morph(mask, true), false);
+
+    // 5) Largest connected bright region (prefer the one in the middle)
+    const label = new Int32Array(N).fill(-1);
+    const stack = new Int32Array(N);
+    let bestComp = -1, bestScore = 0, comp = 0;
+    const comps = [];
+    const cx0 = W / 2, cy0 = H / 2;
+    for (let i = 0; i < N; i++) {
+        if (!mask[i] || label[i] !== -1) continue;
+        let sp = 0, area = 0, sx = 0, sy = 0;
+        stack[sp++] = i; label[i] = comp;
+        while (sp) {
+            const p = stack[--sp]; area++;
+            const x = p % W, y = (p / W) | 0; sx += x; sy += y;
+            if (x > 0 && mask[p - 1] && label[p - 1] === -1) { label[p - 1] = comp; stack[sp++] = p - 1; }
+            if (x < W - 1 && mask[p + 1] && label[p + 1] === -1) { label[p + 1] = comp; stack[sp++] = p + 1; }
+            if (y > 0 && mask[p - W] && label[p - W] === -1) { label[p - W] = comp; stack[sp++] = p - W; }
+            if (y < H - 1 && mask[p + W] && label[p + W] === -1) { label[p + W] = comp; stack[sp++] = p + W; }
+        }
+        const d = Math.hypot(sx / area - cx0, sy / area - cy0) / Math.hypot(cx0, cy0);
+        const sc2 = area * (1.2 - d);
+        comps.push(area);
+        if (sc2 > bestScore) { bestScore = sc2; bestComp = comp; }
+        comp++;
+    }
+    if (bestComp < 0) return null;
+    const compArea = comps[bestComp];
+    if (compArea < 0.12 * N) return null;
+
+    // 6) Boundary points → convex hull
+    const pts = [];
+    for (let y = 0; y < H; y++) {
+        let l = -1, r = -1;
+        for (let x = 0; x < W; x++) if (label[y * W + x] === bestComp) { if (l < 0) l = x; r = x; }
+        if (l >= 0) { pts.push([l, y]); if (r !== l) pts.push([r, y]); }
+    }
+    const hull = convexHull(pts);
+    if (hull.length < 4) return null;
+
+    // 7) Largest-area quadrilateral using hull vertices
+    const hp = hull.length > 60 ? hull.filter((_, i) => i % Math.ceil(hull.length / 60) === 0) : hull;
+    const n = hp.length;
+    const tri = (a, b, c) => Math.abs((b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1])) / 2;
+    let bestQ = null, bestA = 0;
+    for (let i = 0; i < n; i++) for (let k = i + 2; k < n; k++) {
+        let a1 = 0, j1 = -1, a2 = 0, j2 = -1;
+        for (let j = i + 1; j < k; j++) { const a = tri(hp[i], hp[j], hp[k]); if (a > a1) { a1 = a; j1 = j; } }
+        for (let j = k + 1; j < n + i; j++) { const jj = j % n; const a = tri(hp[i], hp[k], hp[jj]); if (a > a2) { a2 = a; j2 = jj; } }
+        if (j1 >= 0 && j2 >= 0 && a1 + a2 > bestA) { bestA = a1 + a2; bestQ = [hp[i], hp[j1], hp[k], hp[j2]]; }
+    }
+    if (!bestQ) return null;
+
+    // 8) Sanity checks: big enough, and the region really is quadrilateral
+    if (bestA < 0.15 * N) return null;
+    if (compArea / bestA < 0.8) return null;
+    if (bestA > 0.97 * N) return null; // paper already fills the photo
+
+    // 9) Precise corners from straight-line fits along each paper edge
+    bestQ = refineQuadByEdges(label, bestComp, W, H, bestQ);
+
+    // Order TL, TR, BR, BL and pull corners slightly inward (keeps table edges out)
+    const cxq = bestQ.reduce((a, p) => a + p[0], 0) / 4;
+    const cyq = bestQ.reduce((a, p) => a + p[1], 0) / 4;
+    const ordered = bestQ.slice().sort((a, b) => Math.atan2(a[1] - cyq, a[0] - cxq) - Math.atan2(b[1] - cyq, b[0] - cxq));
+    let start = 0;
+    ordered.forEach((p, i) => { if (p[0] + p[1] < ordered[start][0] + ordered[start][1]) start = i; });
+    const quad = [0, 1, 2, 3].map(i => ordered[(start + i) % 4]);
+    return quad.map(([x, y]) => {
+        const dx = x - cxq, dy = y - cyq, len = Math.hypot(dx, dy) || 1;
+        return {
+            x: Math.max(0, Math.min(1, (x - dx / len * 0.8 + 0.5) / W)),
+            y: Math.max(0, Math.min(1, (y - dy / len * 0.8 + 0.5) / H))
+        };
+    });
+}
+
+function refineQuadByEdges(label, comp, W, H, quad) {
+    const bx = [], by = [];
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+        const p = y * W + x;
+        if (label[p] !== comp) continue;
+        if (x === 0 || y === 0 || x === W - 1 || y === H - 1 ||
+            label[p - 1] !== comp || label[p + 1] !== comp ||
+            label[p - W] !== comp || label[p + W] !== comp) { bx.push(x + 0.5); by.push(y + 0.5); }
+    }
+    const tol = Math.max(2, 0.03 * Math.min(W, H));
+    const sums = [0, 1, 2, 3].map(() => ({ n: 0, sx: 0, sy: 0, sxx: 0, syy: 0, sxy: 0 }));
+    const edges = [0, 1, 2, 3].map(i => {
+        const a = quad[i], b = quad[(i + 1) % 4];
+        const dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy) || 1;
+        return { a, ux: dx / L, uy: dy / L, L };
+    });
+    for (let k = 0; k < bx.length; k++) {
+        let best = -1, bestD = tol;
+        for (let i = 0; i < 4; i++) {
+            const e = edges[i];
+            const rx = bx[k] - e.a[0], ry = by[k] - e.a[1];
+            const t = rx * e.ux + ry * e.uy;
+            if (t < 0.12 * e.L || t > 0.88 * e.L) continue; // skip rounded corners
+            const dist = Math.abs(rx * e.uy - ry * e.ux);
+            if (dist < bestD) { bestD = dist; best = i; }
+        }
+        if (best < 0) continue;
+        const s = sums[best], x = bx[k], y = by[k];
+        s.n++; s.sx += x; s.sy += y; s.sxx += x * x; s.syy += y * y; s.sxy += x * y;
+    }
+    // Total-least-squares line per edge: point (mx,my) + direction (vx,vy)
+    const lines = sums.map((s, i) => {
+        const e = edges[i];
+        if (s.n < 10) return { mx: e.a[0], my: e.a[1], vx: e.ux, vy: e.uy };
+        const mx = s.sx / s.n, my = s.sy / s.n;
+        const cxx = s.sxx / s.n - mx * mx, cyy = s.syy / s.n - my * my, cxy = s.sxy / s.n - mx * my;
+        const ang = 0.5 * Math.atan2(2 * cxy, cxx - cyy);
+        return { mx, my, vx: Math.cos(ang), vy: Math.sin(ang) };
+    });
+    const diag = Math.hypot(W, H);
+    return quad.map((q, i) => {
+        const l1 = lines[(i + 3) % 4], l2 = lines[i];
+        const den = l1.vx * l2.vy - l1.vy * l2.vx;
+        if (Math.abs(den) < 0.2) return q; // nearly parallel → keep rough corner
+        const t = ((l2.mx - l1.mx) * l2.vy - (l2.my - l1.my) * l2.vx) / den;
+        const x = l1.mx + l1.vx * t, y = l1.my + l1.vy * t;
+        if (Math.hypot(x - q[0], y - q[1]) > 0.06 * diag) return q;
+        return [Math.max(0, Math.min(W - 1, x - 0.5)), Math.max(0, Math.min(H - 1, y - 0.5))];
+    });
+}
+
+function convexHull(points) {
+    const p = points.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+    if (p.length < 3) return p;
+    const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+    const lower = [], upper = [];
+    for (const q of p) { while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], q) <= 0) lower.pop(); lower.push(q); }
+    for (let i = p.length - 1; i >= 0; i--) { const q = p[i]; while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], q) <= 0) upper.pop(); upper.push(q); }
+    upper.pop(); lower.pop();
+    return lower.concat(upper);
+}
+
+function warpPerspective(src, corners) {
+    const P = corners.map(c => [c.x * src.width, c.y * src.height]);
+    const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+    let ow = Math.max(dist(P[0], P[1]), dist(P[3], P[2]));
+    let oh = Math.max(dist(P[0], P[3]), dist(P[1], P[2]));
+    const cap = Math.min(1, 2000 / Math.max(ow, oh), Math.sqrt(4000000 / (ow * oh)));
+    ow = Math.max(60, Math.round(ow * cap));
+    oh = Math.max(60, Math.round(oh * cap));
+
+    const [x0, y0] = P[0], [x1, y1] = P[1], [x2, y2] = P[2], [x3, y3] = P[3];
+    const dx1 = x1 - x2, dx2 = x3 - x2, dx3 = x0 - x1 + x2 - x3;
+    const dy1 = y1 - y2, dy2 = y3 - y2, dy3 = y0 - y1 + y2 - y3;
+    const den = dx1 * dy2 - dx2 * dy1 || 1e-9;
+    const g = (dx3 * dy2 - dx2 * dy3) / den;
+    const h = (dx1 * dy3 - dx3 * dy1) / den;
+    const a = x1 - x0 + g * x1, b = x3 - x0 + h * x3, c = x0;
+    const d = y1 - y0 + g * y1, e = y3 - y0 + h * y3, f = y0;
+
+    const sw = src.width, sh = src.height;
+    const sdata = src.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, sw, sh).data;
+    const out = document.createElement('canvas');
+    out.width = ow; out.height = oh;
+    const octx = out.getContext('2d');
+    const img = octx.createImageData(ow, oh);
+    const od = img.data;
+    for (let v = 0; v < oh; v++) {
+        const fv = (v + 0.5) / oh;
+        for (let u = 0; u < ow; u++) {
+            const fu = (u + 0.5) / ow;
+            const w = g * fu + h * fv + 1;
+            let sx = (a * fu + b * fv + c) / w - 0.5;
+            let sy = (d * fu + e * fv + f) / w - 0.5;
+            if (sx < 0) sx = 0; else if (sx > sw - 1.001) sx = sw - 1.001;
+            if (sy < 0) sy = 0; else if (sy > sh - 1.001) sy = sh - 1.001;
+            const ix = sx | 0, iy = sy | 0, fx = sx - ix, fy = sy - iy;
+            const i00 = (iy * sw + ix) * 4, i10 = i00 + 4, i01 = i00 + sw * 4, i11 = i01 + 4;
+            const o = (v * ow + u) * 4;
+            for (let ch = 0; ch < 3; ch++) {
+                const top = sdata[i00 + ch] + (sdata[i10 + ch] - sdata[i00 + ch]) * fx;
+                const bot = sdata[i01 + ch] + (sdata[i11 + ch] - sdata[i01 + ch]) * fx;
+                od[o + ch] = top + (bot - top) * fy;
+            }
+            od[o + 3] = 255;
+        }
+    }
+    octx.putImageData(img, 0, 0);
+    return out;
+}
+
+function estimatePaperBackground(lum, w, h) {
+    const B = Math.max(1, Math.ceil(Math.max(w, h) / 220));
+    const sw = Math.ceil(w / B), sh = Math.ceil(h / B);
+    let small = new Float32Array(sw * sh);
+    const colIdx = new Int32Array(w);
+    for (let x = 0; x < w; x++) colIdx[x] = (x / B) | 0;
+    for (let y = 0; y < h; y++) {
+        const row = ((y / B) | 0) * sw, base = y * w;
+        for (let x = 0; x < w; x++) {
+            const k = row + colIdx[x];
+            const v = lum[base + x];
+            if (v > small[k]) small[k] = v;
+        }
+    }
+    // Max filter (erases dark text/logos), then box blur (smooth light field)
+    const filt = (src, R, isMax) => {
+        const t = new Float32Array(sw * sh), o = new Float32Array(sw * sh);
+        for (let y = 0; y < sh; y++) for (let x = 0; x < sw; x++) {
+            let a = isMax ? 0 : 0, n = 0;
+            for (let d = -R; d <= R; d++) {
+                const xx = x + d; if (xx < 0 || xx >= sw) continue;
+                const v = src[y * sw + xx];
+                if (isMax) { if (v > a) a = v; } else { a += v; n++; }
+            }
+            t[y * sw + x] = isMax ? a : a / n;
+        }
+        for (let x = 0; x < sw; x++) for (let y = 0; y < sh; y++) {
+            let a = 0, n = 0;
+            for (let d = -R; d <= R; d++) {
+                const yy = y + d; if (yy < 0 || yy >= sh) continue;
+                const v = t[yy * sw + x];
+                if (isMax) { if (v > a) a = v; } else { a += v; n++; }
+            }
+            o[y * sw + x] = isMax ? a : a / n;
+        }
+        return o;
+    };
+    small = filt(small, 4, true);
+    small = filt(filt(small, 3, false), 3, false);
+    // Bilinear upsample back to full size
+    const bg = new Float32Array(w * h);
+    const X0 = new Int32Array(w), X1 = new Int32Array(w), TX = new Float32Array(w);
+    for (let x = 0; x < w; x++) {
+        let fx = (x + 0.5) / B - 0.5; if (fx < 0) fx = 0; if (fx > sw - 1) fx = sw - 1;
+        X0[x] = fx | 0; X1[x] = Math.min(sw - 1, X0[x] + 1); TX[x] = fx - X0[x];
+    }
+    const rowA = new Float32Array(sw);
+    for (let y = 0; y < h; y++) {
+        let fy = (y + 0.5) / B - 0.5; if (fy < 0) fy = 0; if (fy > sh - 1) fy = sh - 1;
+        const y0 = fy | 0, y1 = Math.min(sh - 1, y0 + 1), ty = fy - y0;
+        for (let k = 0; k < sw; k++) rowA[k] = small[y0 * sw + k] + (small[y1 * sw + k] - small[y0 * sw + k]) * ty;
+        const base = y * w;
+        for (let x = 0; x < w; x++) {
+            const a = rowA[X0[x]];
+            bg[base + x] = a + (rowA[X1[x]] - a) * TX[x];
+        }
+    }
+    return bg;
+}
+
+function normalizedLuminance(d, w, h) {
+    const N = w * h, lum = new Float32Array(N);
+    for (let i = 0, j = 0; i < N; i++, j += 4) lum[i] = 0.299 * d[j] + 0.587 * d[j + 1] + 0.114 * d[j + 2];
+    const bg = estimatePaperBackground(lum, w, h);
+    for (let i = 0; i < N; i++) {
+        const v = lum[i] * 255 / Math.max(40, bg[i]);
+        lum[i] = v > 255 ? 255 : v;
+    }
+    return lum;
+}
+
+function estimateSkewAngle(d, w, h) {
+    const norm = normalizedLuminance(d, w, h);
+    const pts = [];
+    const step = Math.max(1, Math.round(Math.sqrt(w * h / 250000)));
+    const mx = w * 0.04, my = h * 0.04; // ignore borders
+    for (let y = my | 0; y < h - my; y += step)
+        for (let x = mx | 0; x < w - mx; x += step)
+            if (norm[y * w + x] < 140) pts.push(x - w / 2, y - h / 2);
+    if (pts.length < 400) return 0;
+    const binSize = Math.max(1, step);
+    const score = (deg) => {
+        const a = deg * Math.PI / 180, s = Math.sin(a), c = Math.cos(a);
+        const off = Math.hypot(w, h) / 2;
+        const nb = Math.ceil(off * 2 / binSize) + 2;
+        const hist = new Float32Array(nb);
+        for (let i = 0; i < pts.length; i += 2) {
+            const yy = pts[i + 1] * c - pts[i] * s + off;
+            hist[(yy / binSize) | 0]++;
+        }
+        let sq = 0; for (let i = 0; i < nb; i++) sq += hist[i] * hist[i];
+        return sq;
+    };
+    let best = 0, bestS = -1;
+    for (let a = -6; a <= 6.001; a += 0.25) { const s = score(a); if (s > bestS) { bestS = s; best = a; } }
+    const c0 = best;
+    for (let a = c0 - 0.25; a <= c0 + 0.25; a += 0.05) { const s = score(a); if (s > bestS) { bestS = s; best = a; } }
+    return best;
+}
+
+function deskewCanvas(src) {
+    try {
+        const sc = Math.min(1, 1000 / Math.max(src.width, src.height));
+        const t = document.createElement('canvas');
+        t.width = Math.max(8, Math.round(src.width * sc));
+        t.height = Math.max(8, Math.round(src.height * sc));
+        const tctx = t.getContext('2d', { willReadFrequently: true });
+        tctx.drawImage(src, 0, 0, t.width, t.height);
+        const deg = estimateSkewAngle(tctx.getImageData(0, 0, t.width, t.height).data, t.width, t.height);
+        if (Math.abs(deg) < 0.4) return src;
+        const out = document.createElement('canvas');
+        out.width = src.width; out.height = src.height;
+        const o = out.getContext('2d');
+        o.fillStyle = '#ffffff';
+        o.fillRect(0, 0, out.width, out.height);
+        o.translate(out.width / 2, out.height / 2);
+        o.rotate(-deg * Math.PI / 180);
+        o.drawImage(src, -src.width / 2, -src.height / 2);
+        return out;
+    } catch (e) {
+        console.error(e);
+        return src;
+    }
+}
+
+// Blatt im Foto finden, perspektivisch entzerren und gerade richten. Bei Fehlern: Foto unverändert.
+function belegScanZuschneiden(c){
+  try{
+    const ecken=detectDocumentCorners(c);
+    return deskewCanvas(ecken ? warpPerspective(c,ecken) : c);
+  }catch(e){ console.error(e); return c; }
+}
+
+/* ==================== KI-Belegerkennung (Claude) ====================
+   Liest Lieferant, Datum, Rechnungsnr., Netto/MwSt/Brutto und Positionen aus
+   einem Foto oder PDF. Der API-Schlüssel bleibt NUR auf diesem Gerät
+   (localStorage) — er wird nie in Firebase oder GitHub gespeichert. */
+const KI_KEY="salha_ki_key", KI_MODEL="salha_ki_model";
+function kiKey(){ try{ return localStorage.getItem(KI_KEY)||""; }catch(e){ return ""; } }
+function kiModel(){ try{ return localStorage.getItem(KI_MODEL)||"claude-sonnet-5-5"; }catch(e){ return "claude-sonnet-5-5"; } }
+
+const KI_SCHEMA={type:"object",additionalProperties:false,
+  required:["lieferant","rechnungsnummer","datum","netto","mwst","brutto","waehrung","positionen","hinweis"],
+  properties:{
+    lieferant:{type:"string",description:"Firma, die die Rechnung AUSGESTELLT hat (Verkäufer). Niemals SALHA AUTOTEILE."},
+    rechnungsnummer:{type:"string"},
+    datum:{type:"string",description:"Rechnungsdatum als YYYY-MM-DD, leer wenn unbekannt"},
+    netto:{type:"number",description:"Nettosumme, 0 wenn nicht angegeben"},
+    mwst:{type:"number",description:"Umsatzsteuer-Betrag gesamt, 0 wenn keiner"},
+    brutto:{type:"number",description:"Endbetrag / zu zahlender Gesamtbetrag"},
+    waehrung:{type:"string"},
+    positionen:{type:"array",items:{type:"object",additionalProperties:false,
+      required:["beschreibung","teilenummer","menge","einzelpreis","gesamt"],
+      properties:{beschreibung:{type:"string"},teilenummer:{type:"string"},
+        menge:{type:"number"},einzelpreis:{type:"number"},gesamt:{type:"number"}}}},
+    hinweis:{type:"string",description:"Kurzer Hinweis bei Unsicherheit (unleserlich, Summen passen nicht), sonst leer"}
+  }};
+
+async function belegKI(dataUrl){
+  const key=kiKey();
+  if(!key) throw new Error("Kein KI-Schlüssel — unter Einstellungen eintragen");
+  const m=String(dataUrl).match(/^data:(.*?);base64,(.*)$/);
+  if(!m) throw new Error("Datei nicht lesbar");
+  const mime=m[1], data=m[2];
+  const block = mime==="application/pdf"
+    ? {type:"document",source:{type:"base64",media_type:"application/pdf",data}}
+    : {type:"image",source:{type:"base64",media_type:/^image\/(jpeg|png|gif|webp)$/.test(mime)?mime:"image/jpeg",data}};
+  const ctl=new AbortController(); const tm=setTimeout(()=>ctl.abort(),90000);
+  let res;
+  try{
+    res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",signal:ctl.signal,
+      headers:{"content-type":"application/json","x-api-key":key,"anthropic-version":"2023-06-01",
+        "anthropic-dangerous-direct-browser-access":"true"},
+      body:JSON.stringify({model:kiModel(),max_tokens:4000,
+        output_config:{format:{type:"json_schema",schema:KI_SCHEMA}},
+        messages:[{role:"user",content:[block,{type:"text",text:
+          "Das ist eine Eingangsrechnung eines Lieferanten an SALHA AUTOTEILE (Autoteile-Händler, Alsdorf). "+
+          "Lies die Daten genau aus. Beträge als Zahl in Euro (Punkt als Dezimaltrennzeichen). "+
+          "Lieferant = der Aussteller/Verkäufer, nicht SALHA. Erfinde nichts: unbekannte Texte leer, unbekannte Beträge 0. "+
+          "Prüfe, ob Netto + MwSt = Brutto ergibt; wenn nicht, schreibe das in 'hinweis'."}]}]})});
+  }catch(e){
+    throw new Error(e.name==="AbortError"?"Zeitüberschreitung — bitte nochmal versuchen":"Keine Verbindung zur KI");
+  }finally{ clearTimeout(tm); }
+  const j=await res.json().catch(()=>({}));
+  if(!res.ok){
+    const msg=(j.error&&j.error.message)||("HTTP "+res.status);
+    if(res.status===401) throw new Error("KI-Schlüssel ungültig");
+    if(res.status===402||/credit|billing/i.test(msg)) throw new Error("KI-Guthaben leer — im Anthropic-Konto aufladen");
+    throw new Error("KI-Fehler: "+msg);
+  }
+  if(j.stop_reason==="refusal") throw new Error("KI konnte diesen Beleg nicht lesen");
+  const t=(j.content||[]).find(c=>c.type==="text");
+  if(!t) throw new Error("Leere KI-Antwort");
+  return JSON.parse(t.text);
+}
+
+const zahlDE=n=>(Math.round(n*100)/100).toFixed(2).replace(".",",");
+let BL_KI=null;     // letztes KI-Ergebnis (wird mit dem Beleg gespeichert)
+let BL_KI_QUELLE=null; // Data-URL, die zuletzt ausgelesen wurde
+function blKiStatus(text,farbe){ const el=$("#bl_kiInfo"); el.innerHTML=text; el.style.color=farbe||"var(--steel)"; }
+function blMarkieren(ids){ ids.forEach(i=>{ const el=$("#"+i); el.classList.add("ki-auto");
+  el.addEventListener("input",()=>el.classList.remove("ki-auto"),{once:true}); }); }
+
+async function blAuslesen(dataUrl){
+  BL_KI_QUELLE=dataUrl; BL_KI=null;
+  $("#blKi").disabled=!dataUrl;
+  if(!dataUrl) return blKiStatus("");
+  if(!kiKey()) return blKiStatus("🤖 Automatisches Auslesen: KI-Schlüssel unter <b>Einstellungen</b> eintragen. "+
+    "<span class='ar'>للقراءة التلقائية أدخل مفتاح الذكاء الاصطناعي في الإعدادات.</span>");
+  blKiStatus("🤖 Beleg wird gelesen … <span class='ar'>جاري قراءة الفاتورة…</span>","var(--blau)");
+  $("#blKi").disabled=true; $("#blSave").disabled=true;
+  try{
+    const r=await belegKI(dataUrl);
+    if(BL_KI_QUELLE!==dataUrl) return; // inzwischen andere Datei gewählt
+    BL_KI=r;
+    const gesetzt=[];
+    const setze=(id,v)=>{ if(v===""||v==null) return; $("#"+id).value=v; gesetzt.push(id); };
+    setze("bl_lieferant",(r.lieferant||"").trim());
+    if(/^\d{4}-\d{2}-\d{2}$/.test(r.datum||"")) setze("bl_datum",r.datum);
+    if(r.brutto>0) setze("bl_betrag",zahlDE(r.brutto));
+    if(r.netto>0) setze("bl_netto",zahlDE(r.netto));
+    if(r.brutto>0) setze("bl_mwst",zahlDE(r.mwst||0));
+    if(r.rechnungsnummer) setze("bl_notiz","Re.-Nr. "+r.rechnungsnummer.trim());
+    blMarkieren(gesetzt);
+    const warn=[];
+    if(r.netto>0 && r.brutto>0 && Math.abs(r.netto+r.mwst-r.brutto)>0.02) warn.push("Netto + MwSt ≠ Brutto");
+    if(r.waehrung && !/^(eur|€|euro)$/i.test(r.waehrung.trim())) warn.push("Währung: "+esc(r.waehrung));
+    if(r.hinweis) warn.push(esc(r.hinweis));
+    const pos=(r.positionen||[]).length;
+    blKiStatus(warn.length
+      ? "⚠️ Ausgelesen, aber bitte genau prüfen: "+warn.join(" · ")
+      : "✅ Automatisch ausgelesen"+(pos?" ("+pos+" Positionen)":"")+" — gelb markierte Felder kurz prüfen. "+
+        "<span class='ar'>تمت القراءة — راجع الحقول الصفراء.</span>",
+      warn.length?"var(--rot)":"var(--gruen)");
+  }catch(e){
+    if(BL_KI_QUELLE===dataUrl) blKiStatus("❌ "+esc(e.message||String(e))+" — Felder bitte von Hand ausfüllen.","var(--rot)");
+  }finally{
+    $("#blKi").disabled=!BL_KI_QUELLE; $("#blSave").disabled=false;
+  }
+}
+
+$("#blKi").onclick=()=>{ if(BL_KI_QUELLE) blAuslesen(BL_KI_QUELLE); };
+
+// Einstellungen: KI-Schlüssel (nur lokal auf diesem Gerät)
+$("#s_kikey").value=kiKey();
+$("#s_kimodel").value=kiModel();
+$("#s_kisave").onclick=()=>{
+  try{
+    const k=$("#s_kikey").value.trim();
+    if(k) localStorage.setItem(KI_KEY,k); else localStorage.removeItem(KI_KEY);
+    localStorage.setItem(KI_MODEL,$("#s_kimodel").value);
+    $("#s_kiinfo").textContent=k?"Gespeichert ✓":"Schlüssel entfernt"; $("#s_kiinfo").style.color="var(--gruen)";
+  }catch(e){ toast("Speichern fehlgeschlagen"); }
+};
+$("#s_kimodel").onchange=()=>{ try{ localStorage.setItem(KI_MODEL,$("#s_kimodel").value); }catch(e){} };
+$("#s_kitest").onclick=async()=>{
+  $("#s_kisave").click();
+  const info=$("#s_kiinfo"); info.textContent="Teste …"; info.style.color="var(--steel)";
+  try{
+    const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",
+      headers:{"content-type":"application/json","x-api-key":kiKey(),"anthropic-version":"2023-06-01",
+        "anthropic-dangerous-direct-browser-access":"true"},
+      body:JSON.stringify({model:kiModel(),max_tokens:16,messages:[{role:"user",content:"Antworte nur mit OK"}]})});
+    const j=await r.json().catch(()=>({}));
+    if(r.ok){ info.textContent="✅ Verbindung funktioniert"; info.style.color="var(--gruen)"; }
+    else { info.textContent="❌ "+((j.error&&j.error.message)||("HTTP "+r.status)); info.style.color="var(--rot)"; }
+  }catch(e){ info.textContent="❌ Keine Verbindung"; info.style.color="var(--rot)"; }
+};
+
 // Handy-Fotos sind 3–5 MB — Firestore erlaubt ~1 MB pro Dokument.
 // Wir verkleinern auf max. 1400 px und senken die Qualität, bis es sicher passt.
 function belegFotoVerkleinern(datei){
@@ -2367,14 +2950,23 @@ function belegFotoVerkleinern(datei){
       const img=new Image();
       img.onerror=()=>fehler(new Error("Bild nicht lesbar"));
       img.onload=()=>{
-        const max=1400;
         let w=img.naturalWidth, h=img.naturalHeight;
         if(!w||!h) return fehler(new Error("Bild ohne Größe"));
+        // 1) Arbeitskopie (max. 1800 px) → Blatt ausschneiden und gerade richten
+        const sk=Math.min(1,1800/Math.max(w,h));
+        const roh=document.createElement("canvas"); roh.width=Math.round(w*sk); roh.height=Math.round(h*sk);
+        const rctx=roh.getContext("2d",{willReadFrequently:true});
+        rctx.fillStyle="#fff"; rctx.fillRect(0,0,roh.width,roh.height);
+        rctx.drawImage(img,0,0,roh.width,roh.height);
+        const blatt=belegScanZuschneiden(roh);
+        // 2) Auf max. 1400 px verkleinern
+        const max=1400;
+        w=blatt.width; h=blatt.height;
         if(w>max||h>max){ const f=Math.min(max/w,max/h); w=Math.round(w*f); h=Math.round(h*f); }
         const c=document.createElement("canvas"); c.width=w; c.height=h;
         const ctx=c.getContext("2d");
         ctx.fillStyle="#fff"; ctx.fillRect(0,0,w,h);
-        ctx.drawImage(img,0,0,w,h);
+        ctx.drawImage(blatt,0,0,w,h);
         let q=0.75, out=c.toDataURL("image/jpeg",q);
         while(out.length>650000 && q>0.32){ q-=0.1; out=c.toDataURL("image/jpeg",q); }
         if(out.length>900000) return fehler(new Error("Foto zu groß — bitte näher/heller fotografieren"));
