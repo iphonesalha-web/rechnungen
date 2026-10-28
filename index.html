@@ -2125,11 +2125,12 @@ function renderEink(){
     if(x.art==="e"){ const e=x.e; return `<tr>
     <td class="m" style="color:var(--orange);font-weight:600">${esc(e.nr)}</td>
     <td class="m">${dDE(e.datum)}</td>
-    <td>${esc(e.name)} <span class="tag">${esc(e.land)}</span></td>
+    <td>${esc(e.name)} <span class="tag">${esc(e.land)}</span>${e.storno?` <span class="tag" style="background:#FDECEC;color:var(--rot);font-weight:600">STORNO zu ${esc(e.stornoZu)}</span>`:""}${einkStorniert(e.nr)?` <span class="tag" style="background:#FDECEC;color:var(--rot);font-weight:600">storniert</span>`:""}</td>
     <td><span class="tag">${e.quelle==="privat"?"Privat § 25a":"Händler "+nf.format(e.satz)+" %"}</span></td>
     <td><span class="tag">${esc(e.zahlung)}</span></td>
-    <td class="r m">${eur(e.summe)}</td>
+    <td class="r m"${e.summe<0?' style="color:var(--rot)"':""}>${eur(e.summe)}</td>
     <td class="r"><button class="btn quiet" data-ep="${e.nr}" style="padding:4px 10px;font-size:13px">Drucken</button>
+      ${(e.storno||einkStorniert(e.nr))?"":`<button class="btn quiet" data-es="${e.nr}" style="padding:4px 10px;font-size:13px">Stornieren</button>`}
       <button class="icon" data-ed="${e.nr}" title="Löschen">✕</button></td></tr>`; }
     const b=x.b; return `<tr>
     <td class="m" style="color:var(--steel)">Beleg</td>
@@ -2143,10 +2144,37 @@ function renderEink(){
     : `<tr><td colspan="7" class="empty">Keine Einkaufsbelege</td></tr>`;
   $$("#eTab button[data-ep]").forEach(b=>b.onclick=()=>druckEinkauf(+b.dataset.ep));
   $$("#eTab button[data-ed]").forEach(b=>b.onclick=()=>einkLoeschen(+b.dataset.ed));
+  $$("#eTab button[data-es]").forEach(b=>b.onclick=()=>einkStornieren(+b.dataset.es));
   $$("#eTab button[data-edl]").forEach(bt=>bt.onclick=()=>{
     const b=DB.belege.find(x=>String(x.id)===bt.dataset.edl); if(b) belegDownload(b); });
 }
 $("#eFilterMonat").onchange=renderEink;
+// Storno = Gegenbeleg mit eigener Nummer und negativen Beträgen. Der Originalbeleg bleibt unverändert.
+const einkStorniert=nr=>DB.einkauf.some(x=>x.storno&&x.stornoZu===nr);
+async function einkStornieren(nr){
+  const o=DB.einkauf.find(x=>x.nr===nr); if(!o) return toast("Beleg nicht gefunden");
+  if(o.storno) return toast("Ein Storno kann nicht storniert werden");
+  if(einkStorniert(nr)) return toast("Dieser Beleg ist schon storniert");
+  const grund=prompt("Einkaufsbeleg "+nr+" ("+o.name+", "+eur(o.summe)+") stornieren.\n\nGrund:","Rückgabe – Ware defekt");
+  if(grund===null) return;
+  const dat=prompt("Datum der Erstattung (JJJJ-MM-TT):",heute());
+  if(dat===null) return;
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(dat.trim())) return toast("Datum bitte als JJJJ-MM-TT eingeben");
+  const datum=dat.trim();
+  try{
+    const neu=await Store.nextEinkNr();
+    const rec=Object.assign({},o,{
+      nr:neu, datum, monat:datum.slice(0,7), zahlDatum:datum,
+      storno:true, stornoZu:o.nr, stornoDatum:o.datum,
+      notiz:("STORNO zu Einkaufsbeleg Nr. "+o.nr+" vom "+dDE(o.datum)+(grund.trim()?" — "+grund.trim():"")),
+      pos:o.pos.map(pz=>Object.assign({},pz,{betrag:-Math.abs(pz.betrag)})),
+      versand:-Math.abs(o.versand||0), netto:-Math.abs(o.netto), vorsteuer:-Math.abs(o.vorsteuer||0),
+      summe:-Math.abs(o.summe), erstellt:new Date().toISOString()});
+    await Store.addEinkauf(rec);
+    renderEink(); druckEinkauf(neu);
+    toast("Storno-Beleg "+neu+" erstellt");
+  }catch(e){ toast("Fehler: "+(e.message||e)); }
+}
 async function einkLoeschen(nr){
   if(!confirm("Einkaufsbeleg "+nr+" löschen?\n\nDie Nummer bleibt vergeben."))return;
   try{ await Store.delEinkauf(nr); renderEink(); toast("Gelöscht"); }
@@ -2166,7 +2194,7 @@ function einkaufBogen(e){
   const teil=r2(e.summe-e.versand);
   return `<div class="sheet"><div class="hr-top"></div>
     <div class="head">
-      <div><div class="h-rech" style="color:#1B7A46">EINKAUFSBELEG</div>${e.land&&e.land!=="DE"?`<div style="font-size:9pt;color:#555;margin-top:1mm">Purchase receipt — issued by the buyer</div>`:""}<img class="logo" src="${LOGO}" alt=""></div>
+      <div><div class="h-rech" style="color:${e.storno?"#B3261E":"#1B7A46"}">${e.storno?"STORNO EINKAUFSBELEG":"EINKAUFSBELEG"}</div>${e.land&&e.land!=="DE"?`<div style="font-size:9pt;color:#555;margin-top:1mm">Purchase receipt — issued by the buyer</div>`:""}<img class="logo" src="${LOGO}" alt=""></div>
       <div><div class="h-firm">${esc(w[0]||"")} <i>${esc(w.slice(1).join(" "))}</i></div>
         <div class="h-adr"><div class="spec">${esc(S.zusatz)}</div>
           ${esc(S.str)}<br>${esc(S.ort)}<br>Telefon ${esc(S.tel)}<br>
@@ -2180,7 +2208,8 @@ function einkaufBogen(e){
     <dl class="rmeta">
       <dt>BELEG-NR</dt><dd>${esc(e.nr)}</dd>
       <dt>DATUM</dt><dd>${dDE(e.datum)}</dd>
-      <dt>ZAHLDATUM</dt><dd>${dDE(e.zahlDatum||e.datum)}</dd>
+      <dt>${e.storno?"ERSTATTUNG":"ZAHLDATUM"}</dt><dd>${dDE(e.zahlDatum||e.datum)}</dd>
+      ${e.storno?`<dt>BEZUG</dt><dd style="font-size:10pt">Einkaufsbeleg Nr. ${esc(e.stornoZu)}${e.stornoDatum?" vom "+dDE(e.stornoDatum):""}</dd>`:""}
       ${e.fin?`<dt>FIN / VIN</dt><dd style="font-size:10pt">${esc(e.fin)}</dd>`:""}
       ${e.bj?`<dt>BAUJAHR</dt><dd style="font-size:10pt">${esc(e.bj)}</dd>`:""}
     </dl>
@@ -2197,7 +2226,7 @@ function einkaufBogen(e){
       <tr class="end"><td class="l">SUMME</td><td class="v">${eur(e.summe)}</td></tr>
     </table>
     <div class="foot">
-      <div class="l5" style="color:#12266B">BEZAHLT PER ${esc(String(e.zahlung).toUpperCase())}</div>
+      <div class="l5" style="color:#12266B">${e.storno?"ERSTATTET PER ":"BEZAHLT PER "}${esc(String(e.zahlung).toUpperCase())}</div>
       ${String(S.f4||"").split("\n").map(l=>`<div class="l4">${esc(l)}</div>`).join("")}
     </div></div>`;
 }
@@ -3208,8 +3237,8 @@ function kasseBewegungen(){
   });
   DB.einkauf.forEach(e=>{
     if(e.zahlung!=="Barzahlung") return;
-    b.push({datum:e.datum, beleg:"E "+e.nr, text:"Einkauf · "+(e.firma||e.name),
-            ein:0, aus:e.summe, quelle:"einkauf", id:"e"+e.nr});
+    b.push({datum:e.datum, beleg:"E "+e.nr, text:(e.storno?"Storno Einkauf · ":"Einkauf · ")+(e.firma||e.name),
+            ein:e.summe<0?-e.summe:0, aus:e.summe>0?e.summe:0, quelle:"einkauf", id:"e"+e.nr});
   });
   DB.kasse.forEach(k=>{
     b.push({datum:k.datum, beleg:k.beleg||"—",
