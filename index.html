@@ -2978,7 +2978,7 @@ const KI_PROMPT="Das ist eine Eingangsrechnung eines Lieferanten an SALHA AUTOTE
   "Lieferant = der Aussteller/Verkäufer, nicht SALHA. Erfinde nichts: unbekannte Texte leer, unbekannte Beträge 0. "+
   "Prüfe, ob Netto + MwSt = Brutto ergibt; wenn nicht, schreibe das in 'hinweis'.";
 
-async function belegKIGemini(dataUrl){
+async function belegKIGemini(dataUrl,modell,zeitMs){
   const key=kiKey();
   if(!key) throw new Error("Kein KI-Schlüssel — unter Einstellungen eintragen");
   const m=String(dataUrl).match(/^data:(.*?);base64,(.*)$/);
@@ -2988,23 +2988,27 @@ async function belegKIGemini(dataUrl){
     "lieferant (Text), rechnungsnummer (Text), datum (Text YYYY-MM-DD oder leer), netto (Zahl), mwst (Zahl), "+
     "brutto (Zahl, Endbetrag), waehrung (Text), positionen (Liste von Objekten mit beschreibung, teilenummer, "+
     "menge, einzelpreis, gesamt), hinweis (Text, sonst leer).";
-  const ctl=new AbortController(); const tm=setTimeout(()=>ctl.abort(),90000);
+  const mdl=modell||kiModel();
+  const ctl=new AbortController(); const tm=setTimeout(()=>ctl.abort(),zeitMs||45000);
   let res;
   try{
-    res=await fetch("https://generativelanguage.googleapis.com/v1beta/models/"+encodeURIComponent(kiModel())+":generateContent",
+    res=await fetch("https://generativelanguage.googleapis.com/v1beta/models/"+encodeURIComponent(mdl)+":generateContent",
       {method:"POST",signal:ctl.signal,headers:{"content-type":"application/json","x-goog-api-key":key},
        body:JSON.stringify({
          contents:[{role:"user",parts:[{inline_data:{mime_type:mime,data:m[2]}},{text:KI_PROMPT+" "+felder}]}],
-         generationConfig:{responseMimeType:"application/json",temperature:0}})});
+         generationConfig:Object.assign({responseMimeType:"application/json",temperature:0},
+           mdl==="gemini-3.8-flash"?{thinkingConfig:{thinkingLevel:"low"}}:{})})});
   }catch(e){
-    throw new Error(e.name==="AbortError"?"Zeitüberschreitung — bitte nochmal versuchen":"Keine Verbindung zur KI");
+    const er=new Error(e.name==="AbortError"?"Zeitüberschreitung — bitte nochmal versuchen":"Keine Verbindung zur KI");
+    er.nochmal=true; throw er;
   }finally{ clearTimeout(tm); }
   const j=await res.json().catch(()=>({}));
   if(!res.ok){
     const msg=(j.error&&j.error.message)||("HTTP "+res.status);
     if(res.status===400&&/api key/i.test(msg)||res.status===401||res.status===403) throw new Error("KI-Schlüssel ungültig");
     if(res.status===429) throw new Error("Kostenloses Tageslimit erreicht — später nochmal versuchen");
-    throw new Error("KI-Fehler: "+msg);
+    const er=new Error(res.status===503||res.status===500?"KI gerade überlastet — bitte nochmal versuchen":"KI-Fehler: "+msg);
+    er.nochmal=(res.status===503||res.status===500); throw er;
   }
   const c=(j.candidates||[])[0];
   const txt=c&&c.content&&(c.content.parts||[]).map(p=>p.text||"").join("");
@@ -3024,7 +3028,16 @@ function kiNormal(r){
 }
 
 async function belegKI(dataUrl){
-  return kiNormal(kiAnbieter()==="gemini" ? await belegKIGemini(dataUrl) : await belegKIClaude(dataUrl));
+  if(kiAnbieter()!=="gemini") return kiNormal(await belegKIClaude(dataUrl));
+  // Gemini: erster Versuch mit dem gewählten Modell (45 s). Bei Zeitüberschreitung, Verbindungsabbruch
+  // oder Überlastung automatisch ein zweiter Versuch mit dem schnellen Lite-Modell.
+  const erst=kiModel(), lite="gemini-3.5-flash-lite";
+  try{ return kiNormal(await belegKIGemini(dataUrl,erst,45000)); }
+  catch(e){
+    if(!e.nochmal) throw e;
+    blKiStatus("🤖 Erster Versuch zu langsam — zweiter Versuch mit schnellerem Modell … <span class='ar'>المحاولة الأولى بطيئة — محاولة ثانية بنموذج أسرع…</span>","var(--blau)");
+    return kiNormal(await belegKIGemini(dataUrl,erst===lite?erst:lite,45000));
+  }
 }
 
 const zahlDE=n=>(Math.round(n*100)/100).toFixed(2).replace(".",",");
