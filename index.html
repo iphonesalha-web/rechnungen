@@ -330,13 +330,14 @@ table.data tr.tot td{font-weight:700;border-top:2px solid var(--ink);border-bott
       <label><input type="radio" name="tax" value="auto" checked><span>Automatisch</span></label>
       <label><input type="radio" name="tax" value="mit"><span>Mit MwSt.</span></label>
       <label><input type="radio" name="tax" value="ohne"><span>Ohne MwSt.</span></label>
+      <label><input type="radio" name="tax" value="diff"><span>Differenzbesteuerung § 25a</span></label>
     </div>
     <div class="row" id="taxExtra" style="margin-top:16px;display:none">
       <label style="max-width:140px" id="taxSatzWrap"><span>Satz %</span><input id="n_satz" class="num" value="19"></label>
       <label style="flex:1;min-width:260px"><span>Hinweis auf der Rechnung</span>
         <input id="n_hinweis" list="hinweise" placeholder="z. B. Differenzbesteuerung nach § 25a UStG">
         <datalist id="hinweise">
-          <option value="Differenzbesteuerung nach § 25a UStG. Kein gesonderter Ausweis der Umsatzsteuer.">
+          <option value="Die Lieferung unterliegt der Differenzbesteuerung nach § 25a UStG. Ein Ausweis der Umsatzsteuer erfolgt daher nicht (Gebrauchtgegenstände/Sonderregelung).">
           <option value="Gemäß § 19 UStG wird keine Umsatzsteuer berechnet (Kleinunternehmerregelung).">
           <option value="Steuerfreie Ausfuhrlieferung (§ 4 Nr. 1a i.V.m. § 6 UStG). Tax-free export delivery.">
           <option value="Steuerschuldnerschaft des Leistungsempfängers – Reverse Charge (Art. 196 MwStSystRL).">
@@ -1359,10 +1360,11 @@ $("#n_paste").addEventListener("input",e=>{
 });
 
 /* ---------- Steuer: automatisch oder manuell ---------- */
+const DIFF_TEXT="Die Lieferung unterliegt der Differenzbesteuerung nach § 25a UStG. Ein Ausweis der Umsatzsteuer erfolgt daher nicht (Gebrauchtgegenstände/Sonderregelung).";
 function taxMode(){ const r=$$('input[name=tax]').find(x=>x.checked); return r?r.value:"auto"; }
 function taxUI(){
   const m=taxMode();
-  $("#taxExtra").style.display = m==="auto" ? "none" : "";
+  $("#taxExtra").style.display = (m==="auto"||m==="diff") ? "none" : "";
   $("#taxWarn").style.display  = m==="auto" ? "none" : "";
   $("#taxSatzWrap").style.display = m==="mit" ? "" : "none";
   refreshNeu();
@@ -1378,6 +1380,10 @@ function aktFall(){
     const satz=Math.max(0,parseNum($("#n_satz").value));
     return {st:{satz,art:"inland",kurz:nf.format(satz)+" % MwSt.",lang:"manuell",
                 hinweis:$("#n_hinweis").value.trim()},ustid:ust};
+  }
+  if(m==="diff"){
+    return {st:{satz:0,art:"frei",kurz:"§ 25a UStG",lang:"Differenzbest.",
+                hinweis:DIFF_TEXT},ustid:ust};
   }
   if(m==="ohne"){
     return {st:{satz:0,art:"frei",kurz:"Ohne MwSt.",lang:"manuell",
@@ -1562,8 +1568,9 @@ function bearbeiten(nr){
   // Steuer: automatisch, wenn das Ergebnis identisch wäre — sonst manuell
   const auto=steuerFall(r.land, r.ustid, r.zahlung);
   const gleich = auto.satz===r.satz && auto.kurz===r.kurz;
-  $$('input[name=tax]').forEach(x=>x.checked=(x.value===(gleich?"auto":(r.satz>0?"mit":"ohne"))));
-  if(!gleich){ $("#n_satz").value=nf.format(r.satz); $("#n_hinweis").value=r.hinweis||""; }
+  const diffRe=(r.kurz==="§ 25a UStG");
+  $$('input[name=tax]').forEach(x=>x.checked=(x.value===(gleich?"auto":(diffRe?"diff":(r.satz>0?"mit":"ohne")))));
+  if(!gleich&&!diffRe){ $("#n_satz").value=nf.format(r.satz); $("#n_hinweis").value=r.hinweis||""; }
 
   $("#nPos tbody").innerHTML="";
   (r.pos||[]).forEach(pz=>{
