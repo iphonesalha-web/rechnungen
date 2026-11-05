@@ -844,6 +844,14 @@ table.data tr.tot td{font-weight:700;border-top:2px solid var(--ink);border-bott
     <label style="margin-top:14px"><span>Kleingedrucktes (je Zeile eine)</span><textarea id="f4" rows="3"></textarea></label>
     <label style="margin-top:14px"><span>Schlusszeile</span><input id="f5"></label>
   </div>
+  <div class="card"><h3>Sammel-Änderung: Hinweis § 25a</h3>
+    <p class="hint" style="margin-top:0">Setzt auf allen bestehenden <b>Rechnungen ohne MwSt.</b> den Hinweis der Steuerberatung
+      („Die Lieferung unterliegt der Differenzbesteuerung nach § 25a UStG …“). Rechnungen mit MwSt., Ausfuhr- und Reverse-Charge-Rechnungen,
+      Gutschriften und Einkaufsbelege bleiben unverändert. Jede Änderung wird im Verlauf der Rechnung festgehalten.
+      <span class="ar">يضيف نص § 25a على كل الفواتير القديمة بدون ضريبة. فواتير الضريبة والتصدير والـ Gutschrift وفواتير الشراء ما بتتغيّر.</span></p>
+    <div class="row"><button class="btn ghost" id="diffAlle">Hinweis § 25a auf alle Rechnungen ohne MwSt. anwenden</button></div>
+    <p class="hint" id="diffAlleInfo"></p>
+  </div>
   <div class="card"><h3>Sicherung</h3>
     <div class="row">
       <button class="btn ghost" id="expJson">Sicherung speichern</button>
@@ -3825,6 +3833,31 @@ $("#saveSet").onclick=async()=>{
   if(DB.set.nextEink<1)DB.set.nextEink=1;
   try{ await Store.saveSet(); toast("Gespeichert"); }catch(e){ toast("Fehler: "+e.message); }
   fillSet(); refreshNeu();
+};
+/* Sammel-Änderung: § 25a-Hinweis auf bestehende Rechnungen ohne MwSt. (nach Vorgabe der Steuerberatung) */
+$("#diffAlle").onclick=async()=>{
+  const info=$("#diffAlleInfo"); info.style.color="var(--steel)";
+  const rs=DB.rechnungen.filter(r=>!istGut(r));
+  const ziel=rs.filter(r=>+r.satz===0 && r.art==="frei" && r.kurz!=="§ 25a UStG");
+  const schon=rs.filter(r=>r.kurz==="§ 25a UStG").length;
+  const mit=rs.filter(r=>+r.satz>0).length;
+  const exp=rs.filter(r=>+r.satz===0 && (r.art==="export"||r.art==="rc")).length;
+  if(!ziel.length){ info.textContent="Nichts zu ändern — "+schon+" Rechnungen haben den Hinweis bereits."; return; }
+  if(!confirm(ziel.length+" Rechnungen ohne MwSt. bekommen den Hinweis nach § 25a UStG.\n\n"+
+      "Unverändert bleiben: "+mit+" Rechnungen mit MwSt., "+exp+" Ausfuhr-/Reverse-Charge-Rechnungen, "+schon+" bereits mit § 25a.\n\n"+
+      "Die alte Angabe wird im Verlauf jeder Rechnung gespeichert. Fortfahren?")) return;
+  $("#diffAlle").disabled=true; let ok=0, fehler=0; const jetzt=new Date().toISOString();
+  for(const r of ziel){
+    try{
+      const verlauf=(r.verlauf||[]).concat([{zeit:jetzt, grund:"Sammeländerung nach Vorgabe der Steuerberatung: Hinweis § 25a UStG",
+        vorher:{hinweis:r.hinweis||"", kurz:r.kurz||""}}]);
+      await Store.updRechnung(Object.assign({},r,{hinweis:DIFF_TEXT, kurz:"§ 25a UStG", geaendert:jetzt, verlauf}));
+      ok++; info.textContent="… "+ok+" / "+ziel.length;
+    }catch(e){ fehler++; }
+  }
+  $("#diffAlle").disabled=false; renderListe();
+  info.style.color = fehler ? "var(--rot)" : "var(--gruen)";
+  info.textContent = "✅ "+ok+" Rechnungen geändert"+(fehler?" — ❌ "+fehler+" Fehler, bitte nochmal klicken":"")+".";
 };
 // Logo wird vor dem Speichern verkleinert — Firestore erlaubt max. 1 MB pro Dokument.
 function logoVerkleinern(datei){
