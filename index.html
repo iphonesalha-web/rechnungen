@@ -1377,7 +1377,12 @@ function taxUI(){
   $("#taxSatzWrap").style.display = m==="mit" ? "" : "none";
   refreshNeu();
 }
-$("#taxPick").addEventListener("change",taxUI);
+/* gewählte Steuer-Option merken: bleibt bei neuen Rechnungen, bis sie manuell geändert wird */
+function taxMerken(){ try{ return localStorage.getItem("taxModus")||"auto"; }catch(e){ return "auto"; } }
+function taxZurueck(){ const m=taxMerken(); const ok=$$('input[name=tax]').some(r=>r.value===m);
+  $$('input[name=tax]').forEach(r=>r.checked=(r.value===(ok?m:"auto"))); }
+$("#taxPick").addEventListener("change",()=>{ try{ localStorage.setItem("taxModus",taxMode()); }catch(e){} taxUI(); });
+taxZurueck();
 ["n_satz","n_hinweis"].forEach(id=>{const el=$("#"+id); if(el) el.oninput=refreshNeu;});
 
 function aktFall(){
@@ -1541,7 +1546,7 @@ function formLeeren(){
   ["n_name","n_firma","n_ref","n_fin","n_bj","n_str","n_plz","n_ort","n_tel","n_ustid","n_paste","n_hinweis"]
     .forEach(i=>{ if($("#"+i)) $("#"+i).value=""; });
   $("#n_versand").value="0,00"; $("#nPos tbody").innerHTML=""; posRow();
-  $$('input[name=tax]').forEach(r=>r.checked=(r.value==="auto"));
+  taxZurueck();
   if($("#n_split")) $("#n_split").checked=false;
   taxUI(); refreshNeu();
 }
@@ -1671,7 +1676,7 @@ $("#nSave").onclick=async()=>{
     const rec=erstellt[erstellt.length-1];
     ["n_name","n_firma","n_ref","n_fin","n_bj","n_str","n_plz","n_ort","n_tel","n_ustid","n_paste"].forEach(i=>$("#"+i).value="");
     $("#n_versand").value="0,00"; $("#nPos tbody").innerHTML=""; posRow();
-    $$('input[name=tax]').forEach(r=>r.checked=(r.value==="auto"));
+    taxZurueck();
     $("#n_hinweis").value=""; taxUI(); uiSpeichern(); datumPruefen();
     if($("#n_split")) $("#n_split").checked=false;
     splitUI(); updateNext(); renderListe();
