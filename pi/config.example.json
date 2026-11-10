@@ -1,0 +1,7 @@
+{
+  "email": "pi@deine-domain.de",
+  "passwort": "HIER-PASSWORT",
+  "zielOrdner": "/mnt/nas/Rechnungen",
+  "intervallMinuten": 5,
+  "abDatum": ""
+}

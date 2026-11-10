@@ -1,0 +1,15 @@
+[Unit]
+Description=SALHA Rechnungen -> NAS (PDF-Abgleich)
+After=network-online.target mnt-nas.mount
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/pdf-sync
+ExecStart=/usr/bin/node /home/pi/pdf-sync/pdf-sync.mjs
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target

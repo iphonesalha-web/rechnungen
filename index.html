@@ -4457,6 +4457,7 @@ async function ladenMitWiederholung(versuche){
   throw letzterFehler;
 }
 let LETZTER_LADEFEHLER=false;
+let DATEN_GELADEN=false;
 async function starten(){
   // Gerüst sofort aufbauen — Navigation und Ansicht erscheinen auch dann,
   // wenn das Laden der Daten gleich fehlschlägt oder noch dauert.
@@ -4474,7 +4475,7 @@ async function starten(){
     DB.rechnungen=Array.isArray(d.rechnungen)?d.rechnungen:[];
     DB.einkauf=Array.isArray(d.einkauf)?d.einkauf:[];
     DB.belege=Array.isArray(d.belege)?d.belege:[];
-    DB.kasse=Array.isArray(d.kasse)?d.kasse:[]; }
+    DB.kasse=Array.isArray(d.kasse)?d.kasse:[]; DATEN_GELADEN=true; }
   if(DB.set.logo) LOGO=DB.set.logo;
   $("#brandLogo").src=LOGO; $("#gateLogo").src=LOGO; logoVorschau();
   fillSet(); renderKunden(); renderListe(); posRow(); taxUI(); uiLaden();
@@ -4499,6 +4500,25 @@ document.addEventListener("visibilitychange",()=>{
 });
 
 (async function(){
+/* ---- Export-Schnittstelle (nur lesend) für den automatischen PDF-Abgleich auf dem Raspberry Pi → NAS ---- */
+window.SALHA_EXPORT={
+  zustand(){ return document.getElementById("gate").classList.contains("on")?"login"
+    : (DATEN_GELADEN&&!LETZTER_LADEFEHLER?"bereit":"laedt"); },
+  liste(){
+    const hash=o=>{ const t=JSON.stringify(o); let h=5381; for(let i=0;i<t.length;i++) h=((h<<5)+h+t.charCodeAt(i))|0; return String(h>>>0); };
+    const aus=[];
+    DB.rechnungen.forEach(r=>aus.push({art:istGut(r)?"gutschrift":"rechnung",nr:r.nr,prefix:r.prefix||"",
+      datum:r.datum||"",name:r.name||r.firma||"",hash:hash(r)}));
+    DB.einkauf.forEach(e=>aus.push({art:"einkauf",nr:e.nr,prefix:"",datum:e.datum||"",
+      name:e.name||"",storno:(e.summe||0)<0,hash:hash(e)}));
+    return aus;
+  },
+  html(art,nr,prefix){
+    if(art==="einkauf"){ const e=DB.einkauf.find(x=>x.nr===nr); return e?einkaufBogen(e):""; }
+    const r=DB.rechnungen.find(x=>x.nr===nr&&(x.prefix||"")===(prefix||"")&&(istGut(x)?"gutschrift":"rechnung")===art);
+    return r?(istGut(r)?gutschriftBogen(r):bogen(r)):"";
+  }
+};
   $("#brandLogo").src=LOGO; $("#gateLogo").src=LOGO;
   if(!FIREBASE.apiKey){
     Store=Local; ROLE="owner";
