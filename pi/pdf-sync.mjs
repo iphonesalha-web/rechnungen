@@ -63,6 +63,13 @@ async function zyklus(ctx) {
     if (z !== "bereit") throw new Error("App nicht bereit (Zustand: " + z + ")");
 
     const liste = await page.evaluate(() => window.SALHA_EXPORT.liste());
+    if (process.argv.includes("--pruefen")) {
+      log("Anmeldung OK — " + liste.length + " Belege gefunden (Rechnungen, Gutschriften, Einkauf)");
+      if (!nasBereit()) throw new Error("NAS-Ordner nicht erreichbar: " + CFG.zielOrdner);
+      const t = path.join(CFG.zielOrdner, ".schreibtest"); fs.writeFileSync(t, "ok"); fs.unlinkSync(t);
+      log("NAS-Ordner OK (Schreibtest erfolgreich): " + CFG.zielOrdner);
+      return;
+    }
     const st = statusLesen(); st.belege = st.belege || {};
     const neu = liste.filter(x => {
       if (CFG.abDatum && x.datum && x.datum < CFG.abDatum) return false;
@@ -98,7 +105,7 @@ async function zyklus(ctx) {
 }
 
 (async () => {
-  const einmal = process.argv.includes("--einmal");
+  const einmal = process.argv.includes("--einmal") || process.argv.includes("--pruefen");
   log("Start — Ziel:", CFG.zielOrdner, "| alle", CFG.intervallMinuten, "Min.");
   fs.mkdirSync(CFG.profilOrdner, { recursive: true });
   while (true) {
