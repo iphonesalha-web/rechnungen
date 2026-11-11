@@ -83,10 +83,10 @@ async function zyklus(ctx) {
       return;
     }
     const st = statusLesen(); st.belege = st.belege || {};
+    const bekannt = k => { const a = st.belege[k]; if (!a) return []; return a.hashes || (a.hash ? [a.hash] : []); };
     const neu = liste.filter(x => {
       if (CFG.abDatum && x.datum && x.datum < CFG.abDatum) return false;
-      const alt = st.belege[x.art + "|" + x.prefix + x.nr];
-      return !alt || alt.hash !== x.hash;
+      return !bekannt(x.art + "|" + x.prefix + x.nr).includes(x.hash);   // jede Fassung nur einmal speichern
     });
     if (!neu.length) { log("nichts Neues (" + liste.length + " Belege geprüft)"); return; }
     if (!nasBereit()) { log("WARNUNG: NAS nicht eingebunden/erreichbar (" + CFG.zielOrdner + ") — " + neu.length + " Belege warten"); return; }
@@ -94,7 +94,7 @@ async function zyklus(ctx) {
     let ok = 0;
     for (const x of neu) {
       const key = x.art + "|" + x.prefix + x.nr;
-      const html = await page.evaluate(([a, n, p]) => window.SALHA_EXPORT.html(a, n, p), [x.art, x.nr, x.prefix]);
+      const html = await page.evaluate(([a, n, p, h]) => window.SALHA_EXPORT.html(a, n, p, h), [x.art, x.nr, x.prefix, x.hash]);
       if (!html) { log("übersprungen (leer):", key); continue; }
       await page.evaluate(h => { document.getElementById("out").innerHTML = h; }, html);
       await page.evaluate(() => document.fonts && document.fonts.ready);
@@ -104,11 +104,13 @@ async function zyklus(ctx) {
       const dir = path.join(CFG.zielOrdner, ARTORDNER[x.art], monat.slice(0, 4), monat);
       fs.mkdirSync(dir, { recursive: true });
       const alt = st.belege[key];
-      const ver = alt ? alt.version + 1 : 1;     // geänderter Beleg: neue Datei, die alte bleibt erhalten (GoBD)
+      const hashes = bekannt(key);
+      if (hashes.length >= 5) { log("WARNUNG: " + key + " hat sich schon 5x geändert — übersprungen (bitte prüfen)"); continue; }
+      const ver = hashes.length + 1;           // geänderter Beleg: neue Datei, die alte bleibt erhalten (GoBD)
       const basis = (x.storno ? "Einkaufsbeleg-Storno" : ARTNAME[x.art]) + "_" + x.prefix + x.nr + (x.name ? "_" + sauber(x.name) : "");
       const datei = path.join(dir, basis + (ver > 1 ? "_v" + ver : "") + ".pdf");
       fs.writeFileSync(datei + ".tmp", pdf); fs.renameSync(datei + ".tmp", datei);
-      st.belege[key] = { hash: x.hash, version: ver, datei: path.relative(CFG.zielOrdner, datei), zeit: new Date().toISOString() };
+      st.belege[key] = { hashes: hashes.concat([x.hash]), version: ver, datei: path.relative(CFG.zielOrdner, datei), zeit: new Date().toISOString() };
       statusSchreiben(st); ok++;
       log("gespeichert:", path.relative(CFG.zielOrdner, datei));
     }

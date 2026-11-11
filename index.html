@@ -4501,21 +4501,21 @@ document.addEventListener("visibilitychange",()=>{
 
 (async function(){
 /* ---- Export-Schnittstelle (nur lesend) für den automatischen PDF-Abgleich auf dem Raspberry Pi → NAS ---- */
+const EXP_HASH=o=>{ const t=JSON.stringify(o); let h=5381; for(let i=0;i<t.length;i++) h=((h<<5)+h+t.charCodeAt(i))|0; return String(h>>>0); };
 window.SALHA_EXPORT={
   zustand(){ return document.getElementById("gate").classList.contains("on")?"login"
     : (DATEN_GELADEN&&!LETZTER_LADEFEHLER?"bereit":"laedt"); },
   liste(){
-    const hash=o=>{ const t=JSON.stringify(o); let h=5381; for(let i=0;i<t.length;i++) h=((h<<5)+h+t.charCodeAt(i))|0; return String(h>>>0); };
     const aus=[];
     DB.rechnungen.forEach(r=>aus.push({art:istGut(r)?"gutschrift":"rechnung",nr:r.nr,prefix:r.prefix||"",
-      datum:r.datum||"",name:r.name||r.firma||"",hash:hash(r)}));
+      datum:r.datum||"",name:r.name||r.firma||"",hash:EXP_HASH(r)}));
     DB.einkauf.forEach(e=>aus.push({art:"einkauf",nr:e.nr,prefix:"",datum:e.datum||"",
-      name:e.name||"",storno:(e.summe||0)<0,hash:hash(e)}));
+      name:e.name||"",storno:(e.summe||0)<0,hash:EXP_HASH(e)}));
     return aus;
   },
-  html(art,nr,prefix){
-    if(art==="einkauf"){ const e=DB.einkauf.find(x=>x.nr===nr); return e?einkaufBogen(e):""; }
-    const r=DB.rechnungen.find(x=>x.nr===nr&&(x.prefix||"")===(prefix||"")&&(istGut(x)?"gutschrift":"rechnung")===art);
+  html(art,nr,prefix,hash){
+    if(art==="einkauf"){ const e=DB.einkauf.find(x=>x.nr===nr&&(!hash||EXP_HASH(x)===hash)); return e?einkaufBogen(e):""; }
+    const r=DB.rechnungen.find(x=>x.nr===nr&&(x.prefix||"")===(prefix||"")&&(istGut(x)?"gutschrift":"rechnung")===art&&(!hash||EXP_HASH(x)===hash));
     return r?(istGut(r)?gutschriftBogen(r):bogen(r)):"";
   }
 };
