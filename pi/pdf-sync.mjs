@@ -47,6 +47,13 @@ const statusSchreiben = s => { const t = CFG.statusDatei + ".tmp"; fs.writeFileS
 async function zyklus(ctx) {
   const page = await ctx.newPage();
   try {
+    page.on("response", async r => {
+      if (/accounts:signInWithPassword/.test(r.url())) {
+        let t = ""; try { t = await r.text(); } catch {}
+        let m = ""; try { m = JSON.parse(t).error.message; } catch {}
+        log("Firebase-Antwort auf Anmeldung: HTTP " + r.status() + (m ? " — " + m : " — OK"));
+      }
+    });
     await page.goto(CFG.appUrl, { waitUntil: "load", timeout: 60000 });
     let z = "laedt";
     for (let i = 0; i < 90; i++) {
