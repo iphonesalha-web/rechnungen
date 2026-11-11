@@ -2,8 +2,9 @@
 # Zugangsdaten (Firebase-Konto des Pi) neu eingeben, testen und Dienst neu starten
 DIR="$HOME/pdf-sync"; cd "$DIR" || { echo "Ordner $DIR fehlt — zuerst install.sh ausführen"; exit 1; }
 curl -fsSL https://raw.githubusercontent.com/iphonesalha-web/rechnungen/main/pi/pdf-sync.mjs -o pdf-sync.mjs
-read -r -p "E-Mail des Pi-Kontos (Firebase): " FMAIL </dev/tty
-read -r -s -p "Passwort (wird nicht angezeigt): " FPASS </dev/tty; echo
+read -t 0.3 -n 10000 -s _x </dev/tty 2>/dev/null || true   # alte Eingaben verwerfen
+FMAIL=""; while [ -z "$FMAIL" ]; do read -r -p "E-Mail des Pi-Kontos (Firebase): " FMAIL </dev/tty; FMAIL=$(echo "$FMAIL" | tr -d ' '); done
+FPASS=""; while [ -z "$FPASS" ]; do read -r -s -p "Passwort (wird nicht angezeigt): " FPASS </dev/tty; echo; done
 node -e 'const fs=require("fs");const c=JSON.parse(fs.readFileSync("config.json","utf8"));c.email=process.argv[1];c.passwort=process.argv[2];fs.writeFileSync("config.json",JSON.stringify(c,null,2))' "$FMAIL" "$FPASS"
 chmod 600 config.json
 echo "Teste Anmeldung …"
