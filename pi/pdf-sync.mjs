@@ -53,9 +53,14 @@ async function zyklus(ctx) {
       z = await page.evaluate(() => window.SALHA_EXPORT ? window.SALHA_EXPORT.zustand() : "laedt").catch(() => "laedt");
       if (z === "login" && CFG.email) {
         await page.fill("#gMail", CFG.email); await page.fill("#gPass", CFG.passwort); await page.click("#gGo");
-        await sleep(3000);
-        z = await page.evaluate(() => window.SALHA_EXPORT.zustand());
-        if (z === "login") throw new Error("Anmeldung fehlgeschlagen — E-Mail/Passwort in config.json prüfen.");
+        for (let k = 0; k < 30; k++) {          // bis zu 30 s auf das Ergebnis warten
+          await sleep(1000);
+          const msg = await page.evaluate(() => (document.getElementById("gMsg") || {}).textContent || "");
+          if (/fehlgeschlagen/i.test(msg)) throw new Error("Anmeldung fehlgeschlagen — E-Mail/Passwort falsch (oder Konto in Firebase nicht angelegt).");
+          z = await page.evaluate(() => window.SALHA_EXPORT.zustand());
+          if (z !== "login") break;
+        }
+        if (z === "login") throw new Error("Anmeldung dauert zu lange / nicht möglich.");
       }
       if (z === "bereit") break;
       await sleep(1000);
@@ -115,7 +120,7 @@ async function zyklus(ctx) {
         executablePath: chromiumPfad(), headless: true, args: ["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"],
       });
       await zyklus(ctx);
-    } catch (e) { log("FEHLER:", e.message || e); }
+    } catch (e) { log("FEHLER:", e.message || e); if (process.argv.includes("--pruefen")) process.exitCode = 1; }
     finally { if (ctx) await ctx.close().catch(() => {}); }
     if (einmal) break;
     await sleep(CFG.intervallMinuten * 60000);
