@@ -1713,6 +1713,9 @@ $("#nSave").onclick=async()=>{
 /* ==================== Gutschrift ==================== */
 let G_QUELLE=null;   // die gewählte Ursprungsrechnung
 function nurRechnungen(){ return DB.rechnungen.filter(r=>!istGut(r)); }
+// Storno einer Gutschrift = Gegenbeleg mit eigener Nummer und positiven Beträgen
+const gutStorniert=nr=>DB.rechnungen.some(x=>istGut(x)&&x.storno&&x.stornoZu===nr);
+const gutGilt=x=>istGut(x)&&!x.storno&&!gutStorniert(x.nr);
 function gutInit(){
   if($("#g_zahl") && !$("#g_zahl").options.length)
     $("#g_zahl").innerHTML=ZAHLUNG.map(z=>`<option>${z}</option>`).join("");
@@ -1746,7 +1749,7 @@ function gutLaden(){
   if(!r){ toast("Rechnung nicht gefunden"); return; }
   G_QUELLE=r;
   if($("#g_teil")) $("#g_teil").value="";
-  const schon=DB.rechnungen.filter(x=>istGut(x)&&x.bezugNr===r.nr);
+  const schon=DB.rechnungen.filter(x=>gutGilt(x)&&x.bezugNr===r.nr);
   const bereits=schon.reduce((a,x)=>a+Math.abs(x.brutto),0);
   $("#g_info").innerHTML=`
     <div class="row" style="gap:22px;align-items:flex-start">
@@ -1806,7 +1809,7 @@ function gutSumme(){
 /* ---- Gutschrift bearbeiten — nur am Tag der Ausstellung ---- */
 let EDIT_GUT_NR=null;
 function darfBearbeitenGut(r){
-  if(!istGut(r)) return false;
+  if(!istGut(r)||r.storno||gutStorniert(r.nr)) return false;
   const t=tageSeit(r.erstellt);
   return t>=0 && t<=BEARBEITEN_TAGE;
 }
@@ -1857,7 +1860,7 @@ function bearbeitenGutschrift(nr){
     G_QUELLE=quelle;
     $("#g_zahlHinweis").textContent="Übernommen von Rechnung "+(quelle.prefix||"")+quelle.nr+
       " — bezahlt per "+quelle.zahlung+".";
-    const schon=DB.rechnungen.filter(x=>istGut(x)&&x.bezugNr===quelle.nr&&x.nr!==r.nr);
+    const schon=DB.rechnungen.filter(x=>gutGilt(x)&&x.bezugNr===quelle.nr&&x.nr!==r.nr);
     const bereits=schon.reduce((a,x)=>a+Math.abs(x.brutto),0);
     $("#g_info").innerHTML=`
       <div class="row" style="gap:22px;align-items:flex-start">
@@ -3279,8 +3282,8 @@ function kasseBewegungen(){
   DB.rechnungen.forEach(r=>{
     if(r.zahlung!=="Barzahlung") return;
     if(istGut(r)){
-      b.push({datum:r.datum, beleg:"G "+r.nr, text:"Gutschrift · "+(r.firma||r.name),
-              ein:0, aus:Math.abs(r.brutto), quelle:"gutschrift", id:"g"+r.nr});
+      b.push({datum:r.datum, beleg:"G "+r.nr, text:(r.storno?"Storno Gutschrift "+r.stornoZu+" · ":"Gutschrift · ")+(r.firma||r.name),
+              ein:r.storno?Math.abs(r.brutto):0, aus:r.storno?0:Math.abs(r.brutto), quelle:"gutschrift", id:"g"+r.nr});
     }else{
       // Bei Gebühren zählt nur das, was tatsächlich in die Kasse kam
       const betrag = (r.erhalten!=null && r.erhalten>0) ? r.erhalten : r.brutto;
@@ -3551,11 +3554,11 @@ function renderListe(){
   $("#tab tbody").innerHTML = rows.length ? rows.map(r=>`<tr>
     <td><input type="checkbox" data-nr="${r.nr}" data-typ="${istGut(r)?"gutschrift":"rechnung"}"></td>
     <td class="m" style="color:${istGut(r)?"var(--lila)":"var(--gruen)"};font-weight:600">
-      ${esc((r.prefix||"")+r.nr)}${istGut(r)?'<br><span class="tag" style="background:#F3EDF9;color:var(--lila)">Gutschrift</span>':""}</td>
+      ${esc((r.prefix||"")+r.nr)}${istGut(r)?'<br><span class="tag" style="background:#F3EDF9;color:var(--lila)">'+(r.storno?"Storno-Gutschrift":"Gutschrift")+'</span>':""}${(istGut(r)&&gutStorniert(r.nr))?'<br><span class="tag" style="background:#FDECEC;color:var(--rot);font-weight:600">storniert</span>':""}</td>
     <td class="m">${dDE(r.datum)}${r.geaendert?`<div class="hint" title="${esc(r.geaendert)}">geändert</div>`:""}</td>
     <td>${esc(r.firma||r.name)} <span class="tag">${esc(r.land)}</span>
       ${r.firma?`<div class="hint">${esc(r.name)}</div>`:""}
-      ${istGut(r)?`<div class="hint">zu Rechnung ${esc((r.bezugPrefix||"")+r.bezugNr)}${r.extern?" (extern)":""}</div>`:""}</td>
+      ${istGut(r)?`<div class="hint">${r.storno?"hebt Gutschrift "+esc(r.stornoZu)+" auf · ":""}zu Rechnung ${esc((r.bezugPrefix||"")+r.bezugNr)}${r.extern?" (extern)":""}</div>`:""}</td>
     <td>${r.bezahlt===false
         ? `<span class="tag" style="background:#FDECEC;color:var(--rot);font-weight:600">OFFEN</span>
            <div class="hint">fällig ${dDE(r.faellig||r.datum)}</div>`
@@ -3569,6 +3572,7 @@ function renderListe(){
       ${(!istGut(r)&&r.bezahlt===false)?`<button class="btn quiet" data-b="${r.nr}" style="padding:4px 10px;font-size:13px;border-color:var(--gruen);color:var(--gruen)">Bezahlt</button>`:""}
       ${(!istGut(r)&&darfBearbeiten(r))?`<button class="btn quiet" data-e="${r.nr}" style="padding:4px 10px;font-size:13px;border-color:var(--blau);color:var(--blau)">Ändern</button>`:""}
       ${(istGut(r)&&darfBearbeitenGut(r))?`<button class="btn quiet" data-eg="${r.nr}" style="padding:4px 10px;font-size:13px;border-color:var(--blau);color:var(--blau)">Ändern</button>`:""}
+      ${(istGut(r)&&gutGilt(r))?`<button class="btn quiet" data-sg="${r.nr}" style="padding:4px 10px;font-size:13px;border-color:var(--rot);color:var(--rot)">Stornieren</button>`:""}
       <button class="icon" data-d="${r.nr}" data-t="${istGut(r)?"g":"r"}" title="Löschen">✕</button></td></tr>`).join("")
     : `<tr><td colspan="9" class="empty">Keine Rechnungen</td></tr>`;
   $$("#tab button[data-p]").forEach(b=>b.onclick=()=>
@@ -3577,6 +3581,7 @@ function renderListe(){
   $$("#tab button[data-b]").forEach(b=>b.onclick=()=>alsBezahlt(+b.dataset.b));
   $$("#tab button[data-e]").forEach(b=>b.onclick=()=>bearbeiten(+b.dataset.e));
   $$("#tab button[data-eg]").forEach(b=>b.onclick=()=>bearbeitenGutschrift(+b.dataset.eg));
+  $$("#tab button[data-sg]").forEach(b=>b.onclick=()=>gutStornieren(+b.dataset.sg));
   zeilenKaestchen().forEach(c=>c.onchange=auswahlAktualisieren);
   auswahlAktualisieren();
   $$("#tab button[data-d]").forEach(b=>b.onclick=()=>
@@ -3659,6 +3664,32 @@ $("#bm_speichern").onclick=async()=>{
   }catch(e){ toast("Fehler: "+(e.message||e)); }
   $("#bm_speichern").disabled=false;
 };
+async function gutStornieren(nr){
+  const o=DB.rechnungen.find(x=>x.nr===nr&&istGut(x));
+  if(!o) return toast("Gutschrift nicht gefunden");
+  if(o.storno) return toast("Ein Storno kann nicht storniert werden");
+  if(gutStorniert(nr)) return toast("Diese Gutschrift ist schon storniert");
+  const grund=prompt("Gutschrift "+nr+" ("+(o.firma||o.name)+", "+eur(Math.abs(o.brutto))+") stornieren.\n\n"+
+    "Es entsteht ein Storno-Beleg mit eigener Nummer; die Gutschrift wird aufgehoben und der Betrag wieder als Umsatz gezählt.\n\nGrund:",
+    "Gutschrift irrtümlich erstellt");
+  if(grund===null) return;
+  try{
+    const neu=await Store.nextGutNr();
+    const heuteStr=heute();
+    const rec=Object.assign({},o,{
+      nr:neu, datum:heuteStr, monat:heuteStr.slice(0,7), rueck:heuteStr,
+      storno:true, stornoZu:o.nr, stornoDatum:o.datum, grund:grund.trim(),
+      netto:Math.abs(o.netto), ust:Math.abs(o.ust), brutto:Math.abs(o.brutto),
+      nettoW:Math.abs(o.nettoW!=null?o.nettoW:o.netto), ustW:Math.abs(o.ustW!=null?o.ustW:o.ust),
+      bruttoW:Math.abs(o.bruttoW!=null?o.bruttoW:o.brutto),
+      erstellt:new Date().toISOString()});
+    delete rec.verlauf; delete rec.geaendert;
+    await Store.addRechnung(rec);
+    renderListe(); updateNextGut();
+    druck([{nr:neu,typ:"gutschrift"}]);
+    toast("Storno-Gutschrift "+neu+" erstellt");
+  }catch(e){ toast("Fehler: "+(e.message||e)); }
+}
 async function storno(nr,typ){
   typ=typ||"rechnung";
   const was = typ==="gutschrift" ? "Gutschrift" : "Rechnung";
@@ -3672,7 +3703,7 @@ function auswertung(monat){
   const rs=DB.rechnungen.filter(r=>r.monat===monat);
   const st={},za={};let n=0,u=0,b=0,anzR=0,anzG=0;
   rs.forEach(r=>{
-    if(istGut(r)) anzG++; else anzR++;
+    if(istGut(r)) anzG+=(r.storno?-1:1); else anzR++;
     n+=r.netto;u+=r.ust;b+=r.brutto;
     const k=r.kurz||"—"; (st[k]=st[k]||{c:0,n:0,u:0,b:0});
     st[k].c++;st[k].n+=r.netto;st[k].u+=r.ust;st[k].b+=r.brutto;
@@ -4066,7 +4097,7 @@ function gutschriftBogen(r){
   const w=String(S.firma||"").split(" ");
   return `<div class="sheet"><div class="hr-top"></div>
     <div class="head">
-      <div><div class="h-rech" style="color:#B0189B">GUTSCHRIFT</div><img class="logo" src="${LOGO}" alt=""></div>
+      <div><div class="h-rech" style="color:${r.storno?"#B3261E":"#B0189B"}">${r.storno?"STORNO GUTSCHRIFT":"GUTSCHRIFT"}</div><img class="logo" src="${LOGO}" alt=""></div>
       <div><div class="h-firm">${esc(w[0]||"")} <i>${esc(w.slice(1).join(" "))}</i></div>
         <div class="h-adr"><div class="spec">${esc(S.zusatz)}</div>
           ${esc(S.str)}<br>${esc(S.ort)}<br>Telefon ${esc(S.tel)}<br>
@@ -4082,7 +4113,8 @@ function gutschriftBogen(r){
     <dl class="rmeta">
       <dt>GUTSCHRIFTSNR</dt><dd>${esc(r.nr)}</dd>
       <dt>GUTSCHRIFTSDATUM</dt><dd>${dDE(r.datum)}</dd>
-      <dt>RÜCKZAHLDATUM</dt><dd>${dDE(r.rueck||r.datum)}</dd>
+      ${r.storno?"":`<dt>RÜCKZAHLDATUM</dt><dd>${dDE(r.rueck||r.datum)}</dd>`}
+      ${r.storno?`<dt>STORNO ZU</dt><dd style="font-size:10pt">Gutschrift Nr. ${esc(r.stornoZu)}${r.stornoDatum?" vom "+dDE(r.stornoDatum):""}</dd>`:""}
       <dt>BEZUG</dt><dd style="font-size:10pt">Rechnung Nr. ${esc((r.bezugPrefix||"")+r.bezugNr)}${r.bezugDatum?" vom "+dDE(r.bezugDatum):""}</dd>
     </dl>
     ${r.grund?`<div style="margin-top:6mm;font-size:9.5pt">
@@ -4103,10 +4135,10 @@ function gutschriftBogen(r){
         Nettobetrag ${eur(Math.abs(r.netto))} · <b>Umsatzsteuer ${eur(Math.abs(r.ust))}</b>
         · Gesamtbetrag ${eur(Math.abs(r.brutto))}</div>`:""}
     <div class="foot">
-      <div class="l1">Dieser Betrag wird Ihnen erstattet. Diese Gutschrift wurde maschinell erstellt
-        und ist daher nicht unterschrieben !</div>
+      <div class="l1">${r.storno?"Dieser Beleg hebt die Gutschrift Nr. "+esc(r.stornoZu)+" auf; die Gutschrift ist damit gegenstandslos. Dieser Beleg wurde maschinell erstellt und ist daher nicht unterschrieben !"
+        :"Dieser Betrag wird Ihnen erstattet. Diese Gutschrift wurde maschinell erstellt und ist daher nicht unterschrieben !"}</div>
       ${String(S.f4||"").split("\n").map(l=>`<div class="l4">${esc(l)}</div>`).join("")}
-      <div class="l5">RÜCKZAHLUNG&nbsp; ${esc(r.zahlung)}</div></div></div>`;
+      ${r.storno?"":`<div class="l5">RÜCKZAHLUNG&nbsp; ${esc(r.zahlung)}</div>`}</div></div>`;
 }
 
 function druck(auswahl){
