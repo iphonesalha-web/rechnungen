@@ -452,6 +452,16 @@ table.data tr.tot td{font-weight:700;border-top:2px solid var(--ink);border-bott
       <button class="btn quiet" id="gAdd">+ Position</button>
       <span class="hint">Menge 0 lassen, um eine Position nicht zu erstatten.</span>
     </div>
+    <div class="row" style="margin-top:16px;border-top:1px solid var(--line);padding-top:14px;align-items:flex-end">
+      <label style="max-width:210px"><span>Nur Teilbetrag erstatten (brutto)</span>
+        <input id="g_teil" class="num" style="text-align:right" placeholder="z. B. 150,00"></label>
+      <label style="flex:1;min-width:220px"><span>Grund (optional)</span>
+        <input id="g_teilGrund" placeholder="Preisnachlass / Teilerstattung"></label>
+      <button class="btn quiet" id="g_teilBtn">Teilbetrag übernehmen</button>
+    </div>
+    <div class="hint" style="margin-top:6px">Ersetzt die Positionen oben durch eine einzige Zeile mit diesem Betrag
+      (z. B. 150 € von 700 €). Zurück zu allen Positionen: „Positionen übernehmen“.
+      <span class="ar">لاسترجاع مبلغ معيّن فقط (مثلًا 150€ من 700€) بدل ثمن القطعة كاملًا.</span></div>
     <div class="row spread" style="margin-top:16px;border-top:1px solid var(--line);padding-top:14px">
       <span class="hint" id="gSum">—</span>
       <button class="btn" id="gSave">Gutschrift erstellen</button>
@@ -1735,6 +1745,7 @@ function gutLaden(){
   const r=nurRechnungen().find(x=>x.nr===nr);
   if(!r){ toast("Rechnung nicht gefunden"); return; }
   G_QUELLE=r;
+  if($("#g_teil")) $("#g_teil").value="";
   const schon=DB.rechnungen.filter(x=>istGut(x)&&x.bezugNr===r.nr);
   const bereits=schon.reduce((a,x)=>a+Math.abs(x.brutto),0);
   $("#g_info").innerHTML=`
@@ -1890,6 +1901,17 @@ function bearbeitenGutschrift(nr){
 
 $("#g_rech").onchange=gutLaden;
 $("#g_laden").onclick=gutLaden;
+$("#g_teilBtn").onclick=()=>{
+  const betragTeil=r2(parseNum($("#g_teil").value));
+  if(!(betragTeil>0)) return toast("Bitte einen Betrag eingeben");
+  if(gModus()!=="manuell" && !G_QUELLE) return toast("Bitte zuerst eine Rechnung wählen");
+  let text=$("#g_teilGrund").value.trim()||"Teilerstattung (Preisnachlass)";
+  if(G_QUELLE && G_QUELLE.pos && G_QUELLE.pos.length===1 && !$("#g_teilGrund").value.trim())
+    text+=" – "+G_QUELLE.pos[0].title;
+  $("#gPos tbody").innerHTML="";
+  gutRow(1,text,betragTeil);
+  gutSumme();
+};
 $("#gAdd").onclick=()=>{gutRow(1,"",0);gutSumme();};
 
 $("#gSave").onclick=async()=>{
