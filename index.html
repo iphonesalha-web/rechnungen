@@ -306,7 +306,7 @@ table.data tr.tot td{font-weight:700;border-top:2px solid var(--ink);border-bott
       <span class="hint">In eBay: Bestellung öffnen → Symbol neben „Lieferadresse“ → Vollständige Adresse in Zwischenablage kopieren.
         <span class="ar">في eBay اضغط الأيقونة جنب Lieferadresse لنسخ العنوان، ثم الصقه هنا.</span></span></label>
     <div class="grid g2">
-      <label><span>Name</span><input id="n_name" placeholder="Michael Bauer"></label>
+      <label><span>Name</span><input id="n_name" placeholder="Michael Bauer" list="kundenNamen" autocomplete="off"><datalist id="kundenNamen"></datalist></label>
       <label><span>Firma (optional)</span><input id="n_firma" placeholder="z. B. Kfz-Angermeier GmbH & Co. KG"></label>
       <label><span>Referenz / Benutzername</span><input id="n_ref" placeholder="PayPal-Transaktion, eBay-Name …"></label>
       <label><span>Fahrgestellnummer (FIN/VIN) — bei Fahrzeug</span><input id="n_fin" placeholder="z. B. WBAUF31090E123456"></label>
@@ -1375,6 +1375,32 @@ function adresseUebernehmen(text){
   toast(fehlt.length?("Übernommen — bitte prüfen: "+fehlt.join(", ")):"Adresse übernommen");
   return true;
 }
+/* ---------- Stammkunde: Name wählen → Adresse wird aus der letzten Rechnung übernommen ---------- */
+function letzteKunden(){
+  const m=new Map();
+  DB.rechnungen.filter(r=>!istGut(r)&&r.name).slice()
+    .sort((a,b)=>String(a.datum).localeCompare(String(b.datum))||a.nr-b.nr)
+    .forEach(r=>m.set(norm(r.name),r));            // der neueste Eintrag gewinnt
+  return m;
+}
+function kundenListeFuellen(){
+  const dl=$("#kundenNamen"); if(!dl) return;
+  dl.innerHTML=[...letzteKunden().values()].reverse().slice(0,300)
+    .map(r=>`<option value="${esc(r.name)}">${esc([r.firma,r.plz&&r.ort?r.plz+" "+r.ort:r.ort].filter(Boolean).join(" · "))}</option>`).join("");
+}
+$("#n_name").addEventListener("focus",kundenListeFuellen);
+$("#n_name").addEventListener("input",()=>{
+  // nur auffüllen, wenn die Adressfelder noch leer sind und der Name genau einem bekannten Kunden entspricht
+  if(["n_str","n_plz","n_ort"].some(i=>$("#"+i).value.trim())) return;
+  const r=letzteKunden().get(norm($("#n_name").value));
+  if(!r) return;
+  $("#n_firma").value=r.firma||""; $("#n_str").value=r.str||"";
+  $("#n_plz").value=r.plz||"";     $("#n_ort").value=r.ort||"";
+  $("#n_tel").value=r.tel||"";     $("#n_ustid").value=r.ustid||"";
+  if(r.land) $("#n_land").value=r.land;
+  refreshNeu();
+  toast("Adresse von Rechnung "+(r.prefix||"")+r.nr+" übernommen");
+});
 $("#n_paste").addEventListener("paste",e=>{
   const t=(e.clipboardData||window.clipboardData).getData("text");
   if(!t) return;
