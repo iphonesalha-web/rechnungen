@@ -1380,13 +1380,18 @@ function letzteKunden(){
   const m=new Map();
   DB.rechnungen.filter(r=>!istGut(r)&&r.name).slice()
     .sort((a,b)=>String(a.datum).localeCompare(String(b.datum))||a.nr-b.nr)
-    .forEach(r=>m.set(norm(r.name),r));            // der neueste Eintrag gewinnt
+    .forEach(r=>{ m.set(norm(r.name),r); if(r.firma) m.set(norm(r.firma),r); }); // der neueste Eintrag gewinnt
   return m;
 }
 function kundenListeFuellen(){
   const dl=$("#kundenNamen"); if(!dl) return;
-  dl.innerHTML=[...letzteKunden().values()].reverse().slice(0,300)
-    .map(r=>`<option value="${esc(r.name)}">${esc([r.firma,r.plz&&r.ort?r.plz+" "+r.ort:r.ort].filter(Boolean).join(" · "))}</option>`).join("");
+  const opts=[]; const seen=new Set();
+  [...letzteKunden().entries()].reverse().forEach(([k,r])=>{
+    if(seen.has(k)) return; seen.add(k);
+    const anzeige=(norm(r.firma)===k)?r.firma:r.name;
+    opts.push(`<option value="${esc(anzeige)}">${esc([norm(r.firma)===k?r.name:r.firma,r.plz&&r.ort?r.plz+" "+r.ort:r.ort].filter(Boolean).join(" · "))}</option>`);
+  });
+  dl.innerHTML=opts.slice(0,400).join("");
 }
 $("#n_name").addEventListener("focus",kundenListeFuellen);
 $("#n_name").addEventListener("input",()=>{
@@ -1394,6 +1399,8 @@ $("#n_name").addEventListener("input",()=>{
   if(["n_str","n_plz","n_ort"].some(i=>$("#"+i).value.trim())) return;
   const r=letzteKunden().get(norm($("#n_name").value));
   if(!r) return;
+  const alsFirma=r.firma && norm(r.firma)===norm($("#n_name").value);
+  if(alsFirma) $("#n_name").value=r.name||$("#n_name").value;   // getippt wurde die Firma
   $("#n_firma").value=r.firma||""; $("#n_str").value=r.str||"";
   $("#n_plz").value=r.plz||"";     $("#n_ort").value=r.ort||"";
   $("#n_tel").value=r.tel||"";     $("#n_ustid").value=r.ustid||"";
